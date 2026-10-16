@@ -24,6 +24,7 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     /// Keep an unprocessed copy of each frame for the before/after view (costs one extra render).
     var keepRaw = false
+    let capture = DebugCapture()
 
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
@@ -110,7 +111,7 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         ci.render(img, to: dst, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
 
         var raw: CVPixelBuffer?
-        if keepRaw, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &raw) == kCVReturnSuccess, let raw {
+        if keepRaw || capture.wantsFrames, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &raw) == kCVReturnSuccess, let raw {
             ci.render(img, to: raw, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
         }
 
@@ -137,6 +138,10 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let now = CACurrentMediaTime()
         frameTimes.append(now)
         frameTimes.removeAll { now - $0 > 1 }
+        if let raw, capture.wantsFrames {
+            var st = stats; st.fps = Double(frameTimes.count); st.frameMs = (now - t0) * 1000; st.effectMs = effectMs
+            capture.append(raw: raw, processed: dst, time: CMSampleBufferGetPresentationTimeStamp(sampleBuffer), debug: gaze.debug, stats: st)
+        }
         statsLock.lock()
         _stats.fps = Double(frameTimes.count)
         _stats.frameMs = (now - t0) * 1000

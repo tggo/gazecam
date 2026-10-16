@@ -25,6 +25,11 @@ final class GazeEffect: Effect {
     var strength: Float = 1
     /// Edge blend width when pasting the corrected eye back, px.
     var feather: Float = 3
+    /// Temporal smoothing of landmarks and angle, 0 = off, 0.9 = heavy. Fast moves reset it so the eyes do not lag.
+    var smoothing: Float = 0.6
+
+    private var prevPoints: [CGPoint]?
+    private var prevAngle: (Float, Float)?
 
     /// Last frame's state, for the preview window. Written on the capture queue, read on main.
     struct Debug {
@@ -32,6 +37,8 @@ final class GazeEffect: Effect {
         var yawDeg: Float?, pitchDeg: Float?
         var angle: (v: Float, h: Float) = (0, 0)
         var eyeDistanceCm: Double = 0
+        var motionPx: Double = 0        // mean landmark displacement vs previous frame, before smoothing
+        var smoothingReset = false
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
         var eyePoints: [CGPoint] = []
         var faceBox: CGRect?
@@ -76,7 +83,7 @@ final class GazeEffect: Effect {
         let w = CVPixelBufferGetWidth(buffer), h = CVPixelBufferGetHeight(buffer)
         guard ok, let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
               let lm = face.landmarks, let le = lm.leftEye, let re = lm.rightEye
-        else { d.status = "обличчя не знайдено"; return }
+        else { d.status = "обличчя не знайдено"; prevPoints = nil; prevAngle = nil; return }
         let bb = face.boundingBox
         d.faceBox = CGRect(x: bb.minX * CGFloat(w), y: (1 - bb.maxY) * CGFloat(h), width: bb.width * CGFloat(w), height: bb.height * CGFloat(h))
         d.yawDeg = face.yaw.map { $0.floatValue * 180 / .pi }
@@ -89,11 +96,32 @@ final class GazeEffect: Effect {
         func pts(_ r: VNFaceLandmarkRegion2D) -> [CGPoint] { r.pointsInImage(imageSize: size).map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) } }
         let a = dlibEye(pts(le)), b = dlibEye(pts(re))
         // "R" model = dlib 36-41 = eye on the image-left side; "L" = dlib 42-47 = image-right side.
-        let (imgLeftEye, imgRightEye) = a[0].x < b[0].x ? (a, b) : (b, a)
+        let (rawLeft, rawRight) = a[0].x < b[0].x ? (a, b) : (b, a)
+
+        // Temporal smoothing (EMA). A jump bigger than ~1/4 of an eye width is real motion: snap to it.
+        var cur = rawLeft + rawRight
+        let eyeW = max(abs(rawLeft[3].x - rawLeft[0].x), 1)
+        var reset = true
+        if let prev = prevPoints, prev.count == cur.count {
+            let motion = zip(prev, cur).map { hypot($0.x - $1.x, $0.y - $1.y) }.reduce(0, +) / CGFloat(cur.count)
+            d.motionPx = Double(motion)
+            if motion < eyeW * 0.25 {
+                reset = false
+                let k = CGFloat(smoothing)
+                cur = zip(prev, cur).map { CGPoint(x: $0.x * k + $1.x * (1 - k), y: $0.y * k + $1.y * (1 - k)) }
+            }
+        }
+        d.smoothingReset = reset
+        prevPoints = cur
+        let imgLeftEye = Array(cur[0..<6]), imgRightEye = Array(cur[6..<12])
 
         let cR = mid(imgLeftEye[0], imgLeftEye[3]), cL = mid(imgRightEye[0], imgRightEye[3])
         var angle = gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
         angle = (angle.0 * strength, angle.1 * strength)
+        if !reset, let pa = prevAngle {
+            angle = (pa.0 * smoothing + angle.0 * (1 - smoothing), pa.1 * smoothing + angle.1 * (1 - smoothing))
+        }
+        prevAngle = angle
         d.angle = angle
         d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
         d.eyePoints = imgLeftEye + imgRightEye

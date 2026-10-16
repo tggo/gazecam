@@ -21,8 +21,13 @@ enum TestHarness {
                                                     y: (CGFloat(h) - img.extent.height) / 2 - img.extent.minY))
         ctx.render(img, to: pb!)
 
+        var raw: CVPixelBuffer? // untouched copy for the side-by-side capture
+        CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &raw)
+        ctx.render(img, to: raw!)
+        var gazeEffect: GazeEffect?
         if effectID != "none" {
             let effect: Effect = effectID == "horns" ? HornsEffect() : GazeEffect()
+            gazeEffect = effect as? GazeEffect
             effect.enabled = true
             var warm: CVPixelBuffer? // warm-up on a copy: Vision + Core ML first-run costs
             CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &warm)
@@ -34,6 +39,19 @@ enum TestHarness {
             print(String(format: "%@ applied, %.1f ms/frame", effectID, Date().timeIntervalSince(t0) * 1000 / Double(n)))
         }
 
+        if args.contains("--capture") {
+            // Exercise the debug-capture compositor: original | result + burned-in overlay.
+            let cap = DebugCapture()
+            let sem = DispatchSemaphore(value: 0)
+            var saved: URL?
+            cap.snapshot { saved = $0; sem.signal() }
+            var st = CameraPipeline.Stats(); st.fps = 30; st.frameMs = 25
+            cap.append(raw: raw!, processed: pb!, time: .zero, debug: gazeEffect?.debug ?? GazeEffect.Debug(), stats: st)
+            sem.wait()
+            if let saved { try? FileManager.default.removeItem(at: output); try? FileManager.default.moveItem(at: saved, to: output) }
+            print("capture:", saved != nil ? output.path : "failed")
+            exit(0)
+        }
         let out = CIImage(cvPixelBuffer: pb!)
         try? ctx.writePNGRepresentation(of: out, to: output, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
         exit(0)

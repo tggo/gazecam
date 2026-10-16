@@ -31,6 +31,23 @@ struct GazeSettings: Codable, Equatable {
     var ipd = 6.3
     var maxHeadDeg = 20.0
     var feather = 3.0
+    var smoothing = 0.6
+
+    init() {}
+    // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = GazeSettings()
+        cameraUp = try c.decodeIfPresent(Double.self, forKey: .cameraUp) ?? d.cameraUp
+        cameraRight = try c.decodeIfPresent(Double.self, forKey: .cameraRight) ?? d.cameraRight
+        cameraDepth = try c.decodeIfPresent(Double.self, forKey: .cameraDepth) ?? d.cameraDepth
+        strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? d.strength
+        focalLength = try c.decodeIfPresent(Double.self, forKey: .focalLength) ?? d.focalLength
+        ipd = try c.decodeIfPresent(Double.self, forKey: .ipd) ?? d.ipd
+        maxHeadDeg = try c.decodeIfPresent(Double.self, forKey: .maxHeadDeg) ?? d.maxHeadDeg
+        feather = try c.decodeIfPresent(Double.self, forKey: .feather) ?? d.feather
+        smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
+    }
 }
 
 @MainActor
@@ -67,6 +84,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.ipd = gaze.ipd
         g.maxHeadAngle = Float(gaze.maxHeadDeg * .pi / 180)
         g.feather = Float(gaze.feather)
+        g.smoothing = Float(gaze.smoothing)
     }
 
     func setEffect(_ id: String, _ on: Bool) {
