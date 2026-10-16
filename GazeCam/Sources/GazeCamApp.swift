@@ -6,6 +6,8 @@ import SystemExtensions
 struct GazeCamApp: App {
     @StateObject private var model = AppModel()
 
+    init() { TestHarness.runIfRequested() }
+
     var body: some Scene {
         MenuBarExtra("GazeCam", systemImage: model.running ? "eye.fill" : "eye") {
             MenuView().environmentObject(model)
@@ -22,6 +24,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     @Published var cameras: [AVCaptureDevice] = CameraPipeline.cameras()
     @Published var cameraID: String = ""
     @Published var effectState: [String: Bool] = [:]
+    @Published var cameraHeight: Double = -18
 
     let pipeline = CameraPipeline()
     private let extID = "dev.iamhero.GazeCam.Extension"
@@ -101,6 +104,10 @@ struct MenuView: View {
             Text("Ефекти").font(.subheadline)
             ForEach(model.pipeline.effects, id: \.id) { e in
                 Toggle(e.title, isOn: Binding(get: { model.effectState[e.id] ?? false }, set: { model.setEffect(e.id, $0) }))
+            }
+            if let gaze = model.pipeline.effects.first(where: { $0 is GazeEffect }) as? GazeEffect {
+                Text("Камера над центром екрана: \(Int(-model.cameraHeight)) см").font(.caption)
+                Slider(value: Binding(get: { -model.cameraHeight }, set: { model.cameraHeight = -$0; gaze.cameraOffset.y = -$0 }), in: 0...40)
             }
 
             Divider()

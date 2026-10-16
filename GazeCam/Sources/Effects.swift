@@ -15,7 +15,7 @@ protocol Effect: AnyObject {
 final class HornsEffect: Effect {
     let id = "horns"
     let title = "Ріжки"
-    var enabled = true
+    var enabled = false
 
     private let request = VNDetectFaceRectanglesRequest()
     private var lastFaces: [CGRect] = []

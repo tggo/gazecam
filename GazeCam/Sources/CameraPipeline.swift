@@ -6,7 +6,7 @@ import CoreMedia
 final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     static let width = 1280, height = 720
 
-    let effects: [Effect] = [HornsEffect(), MirrorEffect()]
+    let effects: [Effect] = [GazeEffect(), HornsEffect(), MirrorEffect()]
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "gazecam.capture")

@@ -23,6 +23,7 @@ targets:
     platform: macOS
     sources:
       - path: GazeCam/Sources
+      - path: GazeCam/Models
     dependencies:
       - target: GazeCamExtension
         embed: true
