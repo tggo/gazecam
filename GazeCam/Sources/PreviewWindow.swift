@@ -119,6 +119,8 @@ struct PreviewWindow: View {
             slider("Поріг «очі закриті» (від звичайних)", value: $model.gaze.openRatio, range: 0.3...0.9, unit: "×", digits: 2)
             Button(model.calibration.running ? "Калібрую…" : "Калібрувати по кутах екрана") { model.startCalibration() }
                 .disabled(model.calibration.running || !model.running)
+            Button("Збір датасету (≈45 с, 18 точок)") { model.startDatasetRun() }
+                .disabled(model.calibration.running || !model.running)
             if let r = model.calibration.result {
                 Text(r).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }

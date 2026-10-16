@@ -9,8 +9,19 @@ import SwiftUI
 /// ~/Movies/GazeCam/dataset/<session>/NNNN.jpg + labels.csv (target point, angles to it, pupil, lids, distance).
 @MainActor
 final class CornerCalibration: ObservableObject {
-    struct Point { let name: String; let unit: CGPoint } // unit: -1…1, y up
-    static let points = [
+    struct Point { let name: String; let unit: CGPoint; var camera = false } // unit: -1…1, y up
+    enum Mode { case calibrate, dataset }
+    static let camera = Point(name: "камера", unit: .zero, camera: true)
+    /// Dataset run: 3×3 grid with a look into the camera every few points, so every screen frame has a
+    /// camera frame from the same head pose a few seconds away (training pairs for the warp network).
+    static let datasetPoints: [Point] = {
+        func g(_ x: CGFloat, _ y: CGFloat, _ n: String) -> Point { Point(name: n, unit: CGPoint(x: x, y: y)) }
+        return [camera, g(0, 0, "центр"), g(-1, 1, "верх-ліво"), g(0, 1, "верх-центр"), camera,
+                g(1, 1, "верх-право"), g(-1, 0, "ліво"), g(1, 0, "право"), camera,
+                g(-1, -1, "низ-ліво"), g(0, -1, "низ-центр"), g(1, -1, "низ-право"), camera,
+                g(-0.5, 0.5, "проміжна-1"), g(0.5, -0.5, "проміжна-2"), g(0.5, 0.5, "проміжна-3"), g(-0.5, -0.5, "проміжна-4"), camera]
+    }()
+    static let calibrationPoints = [
         Point(name: "центр", unit: .zero),
         Point(name: "верхній лівий кут", unit: CGPoint(x: -1, y: 1)),
         Point(name: "верхній правий кут", unit: CGPoint(x: 1, y: 1)),
@@ -21,6 +32,8 @@ final class CornerCalibration: ObservableObject {
     static let settle = 0.8, collect = 1.6
 
     @Published var running = false
+    @Published private(set) var mode = Mode.calibrate
+    var points: [Point] { mode == .dataset ? Self.datasetPoints : Self.calibrationPoints }
     @Published var step = 0
     @Published var result: String?
 
@@ -31,13 +44,16 @@ final class CornerCalibration: ObservableObject {
     private weak var gaze: GazeEffect?
     private weak var pipeline: CameraPipeline?
     private var datasetDir: URL?
-    private var labels = "file,point,unit_x,unit_y,target_h_deg,target_v_deg,pupil_x,openness,open_ratio,eye_dist_cm\n"
+    private static let header = "file,point,unit_x,unit_y,target_h_deg,target_v_deg,pupil_x,openness,open_ratio,eye_dist_cm,kind,cam_h_deg,cam_v_deg,lm\n"
+    private var labels = header
     private var frameNo = 0
     private let ci = CIContext()
     private var onDone: ((GazeEffect.VerticalCal, Float?) -> Void)?
 
-    func start(pipeline: CameraPipeline, onDone: @escaping (GazeEffect.VerticalCal, Float?) -> Void) {
+    func start(pipeline: CameraPipeline, mode: Mode = .calibrate, onDone: @escaping (GazeEffect.VerticalCal, Float?) -> Void) {
         guard !running, let screen = NSScreen.main else { return }
+        self.mode = mode
+        labels = Self.header
         self.gaze = pipeline.gaze
         self.pipeline = pipeline
         self.onDone = onDone
@@ -45,7 +61,7 @@ final class CornerCalibration: ObservableObject {
         datasetDir = DebugCapture.dir.appendingPathComponent("dataset/\(f.string(from: Date()))")
         try? FileManager.default.createDirectory(at: datasetDir!, withIntermediateDirectories: true)
         frameNo = 0
-        samples = Array(repeating: [], count: Self.points.count)
+        samples = Array(repeating: [], count: points.count)
         step = 0; result = nil; running = true; stepStart = Date()
 
         let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -78,23 +94,28 @@ final class CornerCalibration: ObservableObject {
         }
         if t > Self.settle + Self.collect {
             step += 1; stepStart = Date()
-            if step >= Self.points.count { finish(apply: true) }
+            if step >= points.count { finish(apply: true) }
         }
     }
 
     /// Original (unprocessed) frame + label. Kept even for closed-eye frames: the label says so via openness.
     private func saveFrame(_ d: GazeEffect.Debug) {
         guard let dir = datasetDir, let raw = pipeline?.stats.raw else { return }
-        let p = Self.points[step]
+        let p = points[step]
         let dist = d.eyeDistanceCm > 0 ? d.eyeDistanceCm : 65
-        let th = atan(Double(p.unit.x) * tan(Self.halfAngle(horizontal: true, distanceCm: dist) * .pi / 180)) * 180 / .pi
-        let tv = atan(Double(p.unit.y) * tan(Self.halfAngle(horizontal: false, distanceCm: dist) * .pi / 180)) * 180 / .pi
+        // Camera position from the gaze settings (y negative = above the screen centre).
+        let off = gaze?.cameraOffset ?? SIMD3(0, -18, -1)
+        let camH = atan(off.x / dist) * 180 / .pi, camV = atan(-off.y / dist) * 180 / .pi
+        let th = p.camera ? camH : atan(Double(p.unit.x) * tan(Self.halfAngle(horizontal: true, distanceCm: dist) * .pi / 180)) * 180 / .pi
+        let tv = p.camera ? camV : atan(Double(p.unit.y) * tan(Self.halfAngle(horizontal: false, distanceCm: dist) * .pi / 180)) * 180 / .pi
+        let lm = d.eyePoints.map { String(format: "%.1f %.1f", $0.x, $0.y) }.joined(separator: " ")
         let name = String(format: "%04d.jpg", frameNo); frameNo += 1
         let img = CIImage(cvPixelBuffer: raw)
         try? ci.writeJPEGRepresentation(of: img, to: dir.appendingPathComponent(name), colorSpace: CGColorSpaceCreateDeviceRGB(),
                                         options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.9])
-        labels += String(format: "%@,%@,%.0f,%.0f,%.2f,%.2f,%@,%.4f,%.4f,%.1f\n", name, p.name.replacingOccurrences(of: " ", with: "_"),
-                         p.unit.x, p.unit.y, th, tv, d.pupilX.map { String(format: "%.4f", $0) } ?? "", d.openness, d.openRatio, d.eyeDistanceCm)
+        labels += String(format: "%@,%@,%.2f,%.2f,%.2f,%.2f,%@,%.4f,%.4f,%.1f,%@,%.2f,%.2f,%@\n", name, p.name.replacingOccurrences(of: " ", with: "_"),
+                         p.unit.x, p.unit.y, th, tv, d.pupilX.map { String(format: "%.4f", $0) } ?? "", d.openness, d.openRatio, d.eyeDistanceCm,
+                         p.camera ? "camera" : "screen", camH, camV, lm)
     }
 
     private func finish(apply: Bool) {
@@ -103,6 +124,10 @@ final class CornerCalibration: ObservableObject {
         window?.orderOut(nil); window = nil
         running = false
         guard apply else { result = "скасовано"; return }
+        if mode == .dataset {
+            result = "Датасет: \(frameNo) кадрів → \(datasetDir?.lastPathComponent ?? "")"
+            return
+        }
 
         func median(_ v: [Float]) -> Float? { v.isEmpty ? nil : v.sorted()[v.count / 2] }
         let r = samples.map { median($0.map(\.r)) }
@@ -145,18 +170,23 @@ private struct CalibrationOverlay: View {
         GeometryReader { geo in
             ZStack {
                 Color.black.opacity(0.55)
-                if cal.step < CornerCalibration.points.count {
-                    let p = CornerCalibration.points[cal.step]
+                if cal.step < cal.points.count {
+                    let p = cal.points[cal.step]
                     let pos = CGPoint(x: geo.size.width / 2 + p.unit.x * (geo.size.width / 2 - CornerCalibration.inset),
                                       y: geo.size.height / 2 - p.unit.y * (geo.size.height / 2 - CornerCalibration.inset))
-                    ZStack {
-                        Circle().stroke(Color.white, lineWidth: 3).frame(width: 44, height: 44)
-                        Circle().fill(Color.red).frame(width: 14, height: 14)
+                    if p.camera {
+                        Image(systemName: "arrow.up").font(.system(size: 90, weight: .bold)).foregroundStyle(.green)
+                            .position(x: geo.size.width / 2, y: 90)
+                    } else {
+                        ZStack {
+                            Circle().stroke(Color.white, lineWidth: 3).frame(width: 44, height: 44)
+                            Circle().fill(Color.red).frame(width: 14, height: 14)
+                        }
+                        .position(pos)
                     }
-                    .position(pos)
                     VStack(spacing: 6) {
-                        Text("Дивись на точку: \(p.name)").font(.system(size: 28, weight: .semibold))
-                        Text("\(cal.step + 1) / \(CornerCalibration.points.count) · голову не повертай").font(.system(size: 18))
+                        Text(p.camera ? "Дивись прямо в камеру" : "Дивись на точку: \(p.name)").font(.system(size: 28, weight: .semibold))
+                        Text("\(cal.step + 1) / \(cal.points.count) · голову не повертай").font(.system(size: 18))
                     }
                     .foregroundStyle(.white)
                     .position(x: geo.size.width / 2, y: geo.size.height / 2 + 80)

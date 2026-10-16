@@ -187,9 +187,9 @@ final class GazeEffect: Effect {
         d.openRatio = r
         var followV: Float = 0, followH: Float = 0
         if angleOverride == nil {
-            let up = r >= vCal.rCenter
-                ? min((r - vCal.rCenter) / max(vCal.rTop - vCal.rCenter, 0.02), 1.3) * vCal.halfDeg
-                : -min((vCal.rCenter - r) / max(vCal.rCenter - vCal.rBottom, 0.05), 1.5) * vCal.halfDeg
+            // Down only: lids drop clearly when looking down (calibrated 0.96 → 0.68) but barely move looking up
+            // (0.96 → 1.03), so an "up" reading is noise that would push a level gaze 10° off.
+            let up = r >= vCal.rCenter ? 0 : -min((vCal.rCenter - r) / max(vCal.rCenter - vCal.rBottom, 0.05), 1.5) * vCal.halfDeg
             d.gazeUpDeg = up
             followV = -up * followGaze
         }
@@ -207,7 +207,8 @@ final class GazeEffect: Effect {
         }
         // A look far beyond what the network can undo is deliberate (looking away): let it through,
         // fading the follow out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
-        let need = hypot(angle.0 + followV, angle.1 + followH)
+        // Judged on the follow alone — the geometric base is constant and must not switch following off.
+        let need = hypot(followV, followH)
         let fade = min(max((1.6 * maxRedirect - need) / (0.6 * maxRedirect), 0), 1)
         d.followDeg = followH * fade
         d.followVDeg = followV * fade
