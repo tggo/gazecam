@@ -61,6 +61,7 @@ final class GazeEffect: Effect {
     var angleOverride: (Float, Float)?
 
     private var prevPoints: [CGPoint]?
+    private var prevRelPoints: [CGPoint]?
     private var prevAngle: (Float, Float)?
 
     /// Last frame's state, for the preview window. Written on the capture queue, read on main.
@@ -171,21 +172,29 @@ final class GazeEffect: Effect {
         // "R" model = dlib 36-41 = eye on the image-left side; "L" = dlib 42-47 = image-right side.
         let (rawLeft, rawRight) = a[0].x < b[0].x ? (a, b) : (b, a)
 
-        // Temporal smoothing (EMA). A jump bigger than ~1/4 of an eye width is real motion: snap to it.
-        var cur = rawLeft + rawRight
+        // Temporal smoothing of the eye SHAPE only (points relative to each eye's centre). The centre itself is
+        // taken from this frame: smoothing absolute positions made the pasted eye trail a moving head.
+        let raw = rawLeft + rawRight
+        func centre(_ p: ArraySlice<CGPoint>) -> CGPoint {
+            CGPoint(x: p.map(\.x).reduce(0, +) / CGFloat(p.count), y: p.map(\.y).reduce(0, +) / CGFloat(p.count))
+        }
+        let centres = [centre(raw[0..<6]), centre(raw[6..<12])]
+        var rel = raw.enumerated().map { i, p in CGPoint(x: p.x - centres[i / 6].x, y: p.y - centres[i / 6].y) }
         let eyeW = max(abs(rawLeft[3].x - rawLeft[0].x), 1)
         var reset = true
-        if let prev = prevPoints, prev.count == cur.count {
-            let motion = zip(prev, cur).map { hypot($0.x - $1.x, $0.y - $1.y) }.reduce(0, +) / CGFloat(cur.count)
+        if let prev = prevPoints, prev.count == raw.count, let prevRel = prevRelPoints {
+            let motion = zip(prev, raw).map { hypot($0.x - $1.x, $0.y - $1.y) }.reduce(0, +) / CGFloat(raw.count)
             d.motionPx = Double(motion)
             if motion < eyeW * 0.25 {
                 reset = false
                 let k = CGFloat(smoothing)
-                cur = zip(prev, cur).map { CGPoint(x: $0.x * k + $1.x * (1 - k), y: $0.y * k + $1.y * (1 - k)) }
+                rel = zip(prevRel, rel).map { CGPoint(x: $0.x * k + $1.x * (1 - k), y: $0.y * k + $1.y * (1 - k)) }
             }
         }
         d.smoothingReset = reset
-        prevPoints = cur
+        prevPoints = raw
+        prevRelPoints = rel
+        let cur = rel.enumerated().map { i, r in CGPoint(x: centres[i / 6].x + r.x, y: centres[i / 6].y + r.y) }
         let imgLeftEye = Array(cur[0..<6]), imgRightEye = Array(cur[6..<12])
         d.eyePoints = imgLeftEye + imgRightEye
 
