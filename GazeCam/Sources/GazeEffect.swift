@@ -37,16 +37,22 @@ final class GazeEffect: Effect {
     var maxRedirect: Float = 20
     /// "Looking at the screen" pupil position. Drifts slowly toward the running average; calibrate() pins it.
     private(set) var neutralX: Float?
-    private var calibrating: [Float]?
+    /// Set by corner calibration; stops the slow auto-drift of the neutral.
+    var neutralLocked = false
     private var pupilX: Float?
+    private var openRatioSmoothed: Float?
 
-    /// Collect ~2 s of pupil positions while the user looks at the screen centre.
-    func calibrate() { calibrating = [] }
+    /// Lid openness (relative to usual) when looking at the screen centre / top edge / bottom edge, and the
+    /// angle from the eyes to those edges. Defaults measured on one user's corner snapshots; calibration replaces them.
+    struct VerticalCal: Codable, Equatable { var rCenter: Float = 1.0, rTop: Float = 1.1, rBottom: Float = 0.62, halfDeg: Float = 15 }
+    var vCal = VerticalCal()
+
+    func setNeutral(_ x: Float) { neutralX = x; neutralLocked = true }
 
     /// Eyes count as closed (blink, looking far down) below this fraction of the user's usual openness:
     /// no correction — Vision invents pupils on a closed lid and the network paints an eye over it.
     /// The usual openness is learned (slow EMA over open frames), so it fits any face and lighting.
-    var openRatio: Float = 0.6
+    var openRatio: Float = 0.4
     private(set) var usualOpenness: Float = 0.22
 
     /// Fixed [vertical, horizontal] redirection for experiments (test harness).
@@ -66,7 +72,9 @@ final class GazeEffect: Effect {
         var pupils: [CGPoint] = []
         var pupilX: Float?, neutralX: Float?
         var followDeg: Float = 0
-        var calibrating = false
+        var openRatio: Float = 1
+        var gazeUpDeg: Float = 0
+        var followVDeg: Float = 0
         var openness: Float = 0
         var usualOpenness: Float = 0
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
@@ -169,31 +177,41 @@ final class GazeEffect: Effect {
         }
         prevAngle = angle
 
-        // Cancel horizontal eye movement relative to the neutral (screen) position.
+        // Cancel eye movement relative to the neutral (screen centre) position.
+        // Horizontal: pupil shift, undone in the network's own units (pupilPerDegree, measured).
+        // Vertical: Vision pupils carry no vertical signal, but the lids follow gaze — openness / usual openness.
+        let k = reset ? 0 : smoothing
+        let ratio = d.openness / max(usualOpenness, 0.01)
+        openRatioSmoothed = openRatioSmoothed.map { $0 * k + ratio * (1 - k) } ?? ratio
+        let r = openRatioSmoothed ?? 1
+        d.openRatio = r
+        var followV: Float = 0, followH: Float = 0
+        if angleOverride == nil {
+            let up = r >= vCal.rCenter
+                ? min((r - vCal.rCenter) / max(vCal.rTop - vCal.rCenter, 0.02), 1.3) * vCal.halfDeg
+                : -min((vCal.rCenter - r) / max(vCal.rCenter - vCal.rBottom, 0.05), 1.5) * vCal.halfDeg
+            d.gazeUpDeg = up
+            followV = -up * followGaze
+        }
         if angleOverride == nil, let lp = lm.leftPupil, let rp = lm.rightPupil,
            let x = pupilOffsetX(le, lp, re, rp) {
-            let k = reset ? 0 : smoothing
             let sx = pupilX.map { $0 * k + x * (1 - k) } ?? x
             pupilX = sx
-            if var c = calibrating {
-                c.append(x); calibrating = c
-                if c.count >= 60 { neutralX = c.sorted()[c.count / 2]; calibrating = nil }
-            } else {
+            if !neutralLocked {
                 // ~20 s time constant: follows posture changes, not individual glances.
                 neutralX = neutralX.map { $0 * 0.998 + sx * 0.002 } ?? sx
             }
-            if let n = neutralX {
-                var follow = -(sx - n) / pupilPerDegree * followGaze
-                // A glance far beyond what the network can undo is a deliberate look away: let it through,
-                // fading out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
-                let need = abs(follow)
-                follow *= min(max((1.6 * maxRedirect - need) / (0.6 * maxRedirect), 0), 1)
-                d.followDeg = follow
-                angle.1 += follow
-            }
-            d.pupilX = sx; d.neutralX = neutralX; d.calibrating = calibrating != nil
+            if let n = neutralX { followH = -(sx - n) / pupilPerDegree * followGaze }
+            d.pupilX = sx; d.neutralX = neutralX
             d.pupils = [lp, rp].compactMap { $0.pointsInImage(imageSize: size).first }.map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) }
         }
+        // A look far beyond what the network can undo is deliberate (looking away): let it through,
+        // fading the follow out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
+        let need = hypot(angle.0 + followV, angle.1 + followH)
+        let fade = min(max((1.6 * maxRedirect - need) / (0.6 * maxRedirect), 0), 1)
+        d.followDeg = followH * fade
+        d.followVDeg = followV * fade
+        angle = (angle.0 + followV * fade, angle.1 + followH * fade)
         d.angle = angle
         d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
 

@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import SwiftUI
 import SystemExtensions
 
@@ -34,7 +35,8 @@ struct GazeSettings: Codable, Equatable {
     var smoothing = 0.6
     var followGaze = 1.0
     var maxRedirect = 20.0
-    var openRatio = 0.6
+    var openRatio = 0.4
+    var vCal: GazeEffect.VerticalCal?
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -53,6 +55,7 @@ struct GazeSettings: Codable, Equatable {
         followGaze = try c.decodeIfPresent(Double.self, forKey: .followGaze) ?? d.followGaze
         maxRedirect = try c.decodeIfPresent(Double.self, forKey: .maxRedirect) ?? d.maxRedirect
         openRatio = try c.decodeIfPresent(Double.self, forKey: .openRatio) ?? d.openRatio
+        vCal = try c.decodeIfPresent(GazeEffect.VerticalCal.self, forKey: .vCal)
     }
 }
 
@@ -80,7 +83,9 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         pipeline.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         // Activation is idempotent; doing it on launch also picks up a rebuilt extension.
         installExtension()
+        calSub = calibration.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
+    private var calSub: AnyCancellable?
 
     private func applyGaze() {
         let g = pipeline.gaze
@@ -94,6 +99,18 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.followGaze = Float(gaze.followGaze)
         g.maxRedirect = Float(gaze.maxRedirect)
         g.openRatio = Float(gaze.openRatio)
+        g.vCal = gaze.vCal ?? GazeEffect.VerticalCal()
+    }
+
+    let calibration = CornerCalibration()
+
+    func startCalibration() {
+        calibration.start(pipeline: pipeline) { [weak self] cal, neutral in
+            self?.gaze.vCal = cal
+            if let neutral { self?.pipeline.gaze.setNeutral(neutral) }
+            self?.objectWillChange.send()
+        }
+        objectWillChange.send()
     }
 
     func setEffect(_ id: String, _ on: Bool) {

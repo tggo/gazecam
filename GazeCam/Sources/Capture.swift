@@ -138,7 +138,8 @@ final class DebugCapture {
             String(format: "корекція верт %.1f°  гор %.1f°", d.angle.v, d.angle.h),
             String(format: "відкритість %.2f (звичайна %.2f)", d.openness, d.usualOpenness),
             String(format: "очі ~%.0f см  рух %.1f px%@", d.eyeDistanceCm, d.motionPx, d.smoothingReset ? "  [скид згладж.]" : ""),
-            String(format: "зіниця %+.3f  нейтраль %+.3f  гасіння %+.1f°%@", d.pupilX ?? .nan, d.neutralX ?? .nan, d.followDeg, d.calibrating ? "  [калібрую]" : ""),
+            String(format: "зіниця %+.3f  нейтраль %+.3f  гасіння гор %+.1f°", d.pupilX ?? .nan, d.neutralX ?? .nan, d.followDeg),
+            String(format: "повіки %.2f× → погляд %+.1f°  гасіння верт %+.1f°", d.openRatio, d.gazeUpDeg, d.followVDeg),
             "дроп \(s.dropped)  вірт.камера \(s.sinkConnected ? "так" : "ні")",
         ]
     }
