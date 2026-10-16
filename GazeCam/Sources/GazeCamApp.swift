@@ -7,7 +7,7 @@ struct GazeCamApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra("GazeCam", systemImage: model.running ? "video.fill" : "video") {
+        MenuBarExtra("GazeCam", systemImage: model.running ? "eye.fill" : "eye") {
             MenuView().environmentObject(model)
         }
         .menuBarExtraStyle(.window)
