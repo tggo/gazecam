@@ -124,14 +124,7 @@ final class DebugCapture {
         defer { NSGraphicsContext.restoreGraphicsState() }
 
         let panelW = CGFloat(CameraPipeline.width)
-        for dx in [0, panelW] {
-            if let f = d.faceBox { stroke(cg, f.offsetBy(dx: dx, dy: 0), .systemYellow, 1) }
-            for b in d.eyeBoxes { stroke(cg, b.offsetBy(dx: dx, dy: 0), .systemGreen, 2) }
-            cg.setFillColor(NSColor.systemTeal.cgColor)
-            for p in d.eyePoints { cg.fillEllipse(in: CGRect(x: p.x + dx - 2.5, y: p.y - 2.5, width: 5, height: 5)) }
-            cg.setFillColor(NSColor.systemRed.cgColor)
-            for p in d.pupils { cg.fillEllipse(in: CGRect(x: p.x + dx - 3, y: p.y - 3, width: 6, height: 6)) }
-        }
+        // No boxes or landmark dots here: they cover the eyes, which is exactly what a capture is for.
         hud(lines(debug: d, stats: s)).draw(at: CGPoint(x: panelW + 14, y: 12))
         label("ОРИГІНАЛ").draw(at: CGPoint(x: 14, y: 12))
     }
