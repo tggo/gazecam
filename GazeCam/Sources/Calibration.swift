@@ -22,6 +22,7 @@ final class CornerCalibration: ObservableObject {
                 g(-0.5, 0.5, "проміжна-1"), g(0.5, -0.5, "проміжна-2"), g(0.5, 0.5, "проміжна-3"), g(-0.5, -0.5, "проміжна-4"), camera]
     }()
     static let calibrationPoints = [
+        camera,
         Point(name: "центр", unit: .zero),
         Point(name: "верхній лівий кут", unit: CGPoint(x: -1, y: 1)),
         Point(name: "верхній правий кут", unit: CGPoint(x: 1, y: 1)),
@@ -50,6 +51,7 @@ final class CornerCalibration: ObservableObject {
     private var lastSaved: CVPixelBuffer?
     private let ci = CIContext()
     private var onDone: ((GazeEffect.VerticalCal, Float?) -> Void)?
+    var onCameraPupil: ((Float) -> Void)?
 
     func start(pipeline: CameraPipeline, mode: Mode = .calibrate, onDone: @escaping (GazeEffect.VerticalCal, Float?) -> Void) {
         guard !running, let screen = NSScreen.main else { return }
@@ -127,7 +129,11 @@ final class CornerCalibration: ObservableObject {
         running = false
         guard apply else { result = "скасовано"; return }
         if mode == .dataset {
-            result = "Датасет: \(frameNo) кадрів → \(datasetDir?.lastPathComponent ?? "")"
+            // Pupil while looking into the lens = the target for gaze following. Learned here, not from habits.
+            let camX = zip(points, samples).filter { $0.0.camera }.flatMap { $0.1.compactMap(\.x) }.sorted()
+            if !camX.isEmpty { onCameraPupil?(camX[camX.count / 2]) }
+            result = "Датасет: \(frameNo) кадрів → \(datasetDir?.lastPathComponent ?? "")" +
+                (camX.isEmpty ? "" : String(format: "; зіниця «у камеру» %+.3f", camX[camX.count / 2]))
             return
         }
 
@@ -135,7 +141,7 @@ final class CornerCalibration: ObservableObject {
         let r = samples.map { median($0.map(\.r)) }
         let x = samples.map { median($0.compactMap(\.x)) }
         let dist = samples.flatMap { $0.map(\.dist) }.filter { $0 > 0 }.sorted()
-        guard let rc = r[0], let rtl = r[1], let rtr = r[2], let rbr = r[3], let rbl = r[4], !dist.isEmpty else {
+        guard let rc = r[1], let rtl = r[2], let rtr = r[3], let rbr = r[4], let rbl = r[5], !dist.isEmpty else {
             result = "мало даних: обличчя не знайдено в деяких точках, спробуй ще раз"; return
         }
         let distCm = dist[dist.count / 2]
@@ -144,11 +150,11 @@ final class CornerCalibration: ObservableObject {
         cal.rTop = (rtl + rtr) / 2
         cal.rBottom = (rbr + rbl) / 2
         cal.halfDeg = Float(Self.halfAngle(horizontal: false, distanceCm: distCm))
-        onDone?(cal, x[0])
+        onDone?(cal, x[0])  // x[0] = looking into the camera
 
         let f = { (v: Float?) in v.map { String(format: "%+.3f", $0) } ?? "—" }
         result = String(format: "Відкритість: центр %.2f, верх %.2f, низ %.2f; кут до верх/низу ±%.0f° на %.0f см.\nЗіниця: центр %@, ліві кути %@/%@, праві %@/%@",
-                        rc, cal.rTop, cal.rBottom, cal.halfDeg, distCm, f(x[0]), f(x[1]), f(x[4]), f(x[2]), f(x[3]))
+                        rc, cal.rTop, cal.rBottom, cal.halfDeg, distCm, f(x[1]), f(x[2]), f(x[5]), f(x[3]), f(x[4]))
         if cal.rTop <= rc || cal.rBottom >= rc { result! += "\n⚠︎ повіки не змінились між верхом і низом — вертикаль буде неточна" }
     }
 

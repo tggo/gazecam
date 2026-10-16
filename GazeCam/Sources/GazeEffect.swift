@@ -32,7 +32,8 @@ final class GazeEffect: Effect {
     /// Lets reading / teleprompter line sweeps disappear. Vertical stays geometric: Vision pupils carry no vertical signal.
     var followGaze: Float = 1
     /// Pupil shift (fraction of eye width) per degree of model redirection, measured: +15° → +0.05.
-    var pupilPerDegree: Float = 0.0033
+    /// Re-measured on a dataset frame per model: stock 0.0022, user fine-tune 0.0028.
+    var pupilPerDegree: Float = 0.0022
     /// Hard cap on the redirect, both axes; the network was trained on roughly ±20°.
     var maxRedirect: Float = 20
     /// "Looking at the screen" pupil position. Drifts slowly toward the running average; calibrate() pins it.
@@ -93,7 +94,12 @@ final class GazeEffect: Effect {
     private var stockModels: [Side: MLModel] = [:]
     private var userModels: [Side: MLModel] = [:]
     /// Weights fine-tuned on this user's dataset runs (train/, GazeWarpUser{L,R}) instead of the stock ones.
-    var useUserModel = false { didSet { models = useUserModel && userModels.count == 2 ? userModels : stockModels } }
+    var useUserModel = false {
+        didSet {
+            models = useUserModel && userModels.count == 2 ? userModels : stockModels
+            pupilPerDegree = useUserModel ? 0.0028 : 0.0022
+        }
+    }
     private let imgArr: MLMultiArray
     private let fpArr: MLMultiArray
     private let angArr: MLMultiArray
@@ -208,7 +214,9 @@ final class GazeEffect: Effect {
         }
         if angleOverride == nil, let lp = lm.leftPupil, let rp = lm.rightPupil,
            let x = pupilOffsetX(le, lp, re, rp) {
-            let sx = pupilX.map { $0 * k + x * (1 - k) } ?? x
+            // Reading saccades are fast: a lighter EMA here, or the corrected eyes trail the real ones.
+            let kf = min(k, 0.3)
+            let sx = pupilX.map { $0 * kf + x * (1 - kf) } ?? x
             pupilX = sx
             if !neutralLocked {
                 // ~20 s time constant: follows posture changes, not individual glances.
@@ -222,7 +230,8 @@ final class GazeEffect: Effect {
         // fading the follow out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
         // Judged on the follow alone — the geometric base is constant and must not switch following off.
         let need = hypot(followV, followH)
-        let fade = min(max((1.6 * maxRedirect - need) / (0.6 * maxRedirect), 0), 1)
+        // Up to 1.5× the cap: follow, clamped by the vector cap below. Fade out by 2.2×: a real look away.
+        let fade = min(max((2.2 * maxRedirect - need) / (0.7 * maxRedirect), 0), 1)
         d.followDeg = followH * fade
         d.followVDeg = followV * fade
         angle = (angle.0 + followV * fade, angle.1 + followH * fade)

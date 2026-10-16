@@ -39,6 +39,7 @@ struct GazeSettings: Codable, Equatable {
     var vCal: GazeEffect.VerticalCal?
     var schema = 2
     var userModel = false
+    var pupilAtCamera: Double?
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -59,6 +60,7 @@ struct GazeSettings: Codable, Equatable {
         openRatio = try c.decodeIfPresent(Double.self, forKey: .openRatio) ?? d.openRatio
         vCal = try c.decodeIfPresent(GazeEffect.VerticalCal.self, forKey: .vCal)
         userModel = try c.decodeIfPresent(Bool.self, forKey: .userModel) ?? false
+        pupilAtCamera = try c.decodeIfPresent(Double.self, forKey: .pupilAtCamera)
         // Schema 1 → 2: strength >1 inflated the geometric base past the cap (28° → white eyes), and the closed-eye
         // ratio 0.6 caught normal downward looks. Reset both once.
         if (try c.decodeIfPresent(Int.self, forKey: .schema)) == nil { strength = 1; openRatio = d.openRatio }
@@ -89,6 +91,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         pipeline.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         // Activation is idempotent; doing it on launch also picks up a rebuilt extension.
         installExtension()
+        calibration.onCameraPupil = { [weak self] x in self?.gaze.pupilAtCamera = Double(x) }
         calSub = calibration.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
     private var calSub: AnyCancellable?
@@ -107,6 +110,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.openRatio = Float(gaze.openRatio)
         g.vCal = gaze.vCal ?? GazeEffect.VerticalCal()
         if g.useUserModel != gaze.userModel { g.useUserModel = gaze.userModel }
+        if let p = gaze.pupilAtCamera, g.neutralX != Float(p) { g.setNeutral(Float(p)) }
     }
 
     let calibration = CornerCalibration()
@@ -119,7 +123,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     func startCalibration() {
         calibration.start(pipeline: pipeline) { [weak self] cal, neutral in
             self?.gaze.vCal = cal
-            if let neutral { self?.pipeline.gaze.setNeutral(neutral) }
+            if let neutral { self?.gaze.pupilAtCamera = Double(neutral) }
             self?.objectWillChange.send()
         }
         objectWillChange.send()
