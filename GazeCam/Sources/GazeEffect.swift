@@ -162,8 +162,6 @@ final class GazeEffect: Effect {
             angle = (pa.0 * smoothing + angle.0 * (1 - smoothing), pa.1 * smoothing + angle.1 * (1 - smoothing))
         }
         prevAngle = angle
-        // Past ~20° the network rolls the iris under the lid (white-eye look), so cap both axes.
-        angle.0 = min(max(angle.0, -maxRedirect), maxRedirect)
 
         // Cancel horizontal eye movement relative to the neutral (screen) position.
         if angleOverride == nil, let lp = lm.leftPupil, let rp = lm.rightPupil,
@@ -179,9 +177,13 @@ final class GazeEffect: Effect {
                 neutralX = neutralX.map { $0 * 0.998 + sx * 0.002 } ?? sx
             }
             if let n = neutralX {
-                let follow = -(sx - n) / pupilPerDegree * followGaze
+                var follow = -(sx - n) / pupilPerDegree * followGaze
+                // A glance far beyond what the network can undo is a deliberate look away: let it through,
+                // fading out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
+                let need = abs(follow)
+                follow *= min(max((1.6 * maxRedirect - need) / (0.6 * maxRedirect), 0), 1)
                 d.followDeg = follow
-                angle.1 = min(max(angle.1 + follow, -maxRedirect), maxRedirect)
+                angle.1 += follow
             }
             d.pupilX = sx; d.neutralX = neutralX; d.calibrating = calibrating != nil
             d.pupils = [lp, rp].compactMap { $0.pointsInImage(imageSize: size).first }.map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) }
@@ -194,6 +196,11 @@ final class GazeEffect: Effect {
         guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return }
         let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
         let frame = Frame(base: base, rowBytes: rowBytes, width: w, height: h)
+
+        // Past ~20° total the network rolls the iris under the lid (white-eye look): cap the vector, not each axis.
+        let mag = hypot(angle.0, angle.1)
+        if mag > maxRedirect { angle = (angle.0 * maxRedirect / mag, angle.1 * maxRedirect / mag) }
+        d.angle = angle
 
         let t1 = CACurrentMediaTime()
         let boxes = [correct(frame, points: imgLeftEye, center: cR, side: .R, seq: [0, 1, 2, 3, 4, 5], angle: angle),
