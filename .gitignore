@@ -1,0 +1,4 @@
+build/
+GazeCam.xcodeproj/
+.DS_Store
+*.xcuserstate

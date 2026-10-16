@@ -1,0 +1,74 @@
+name: GazeCam
+
+options:
+  bundleIdPrefix: dev.iamhero
+  deploymentTarget:
+    macOS: "14.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: 4JV3A5SUSZ
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "Apple Development"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  GazeCam:
+    type: application
+    platform: macOS
+    sources:
+      - path: GazeCam/Sources
+    dependencies:
+      - target: GazeCamExtension
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.iamhero.GazeCam
+        CODE_SIGN_ENTITLEMENTS: GazeCam/GazeCam.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: GazeCam
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: "GazeCam reads the camera and feeds the processed video to the GazeCam virtual camera."
+        INFOPLIST_KEY_NSSystemExtensionUsageDescription: "Installs the GazeCam virtual camera."
+
+  GazeCamExtension:
+    type: system-extension
+    platform: macOS
+    sources:
+      - path: Extension
+        excludes: ["*.plist", "*.entitlements"]
+    info:
+      path: Extension/Info.plist
+      properties:
+        CFBundleDisplayName: GazeCam Camera
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundlePackageType: SYSX
+        CFBundleExecutable: $(EXECUTABLE_NAME)
+        CFBundleIdentifier: $(PRODUCT_BUNDLE_IDENTIFIER)
+        CFBundleName: $(PRODUCT_NAME)
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSSystemExtensionUsageDescription: "GazeCam virtual camera."
+        CMIOExtension:
+          CMIOExtensionMachServiceName: $(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.iamhero.GazeCam.Extension
+        PRODUCT_NAME: dev.iamhero.GazeCam.Extension
+        CODE_SIGN_ENTITLEMENTS: Extension/Extension.entitlements
+        SKIP_INSTALL: YES
+
+schemes:
+  GazeCam:
+    build:
+      targets:
+        GazeCam: all
+    run:
+      config: Debug
+    archive:
+      config: Release
