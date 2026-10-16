@@ -47,6 +47,7 @@ final class CornerCalibration: ObservableObject {
     private static let header = "file,point,unit_x,unit_y,target_h_deg,target_v_deg,pupil_x,openness,open_ratio,eye_dist_cm,kind,cam_h_deg,cam_v_deg,lm\n"
     private var labels = header
     private var frameNo = 0
+    private var lastSaved: CVPixelBuffer?
     private let ci = CIContext()
     private var onDone: ((GazeEffect.VerticalCal, Float?) -> Void)?
 
@@ -100,7 +101,8 @@ final class CornerCalibration: ObservableObject {
 
     /// Original (unprocessed) frame + label. Kept even for closed-eye frames: the label says so via openness.
     private func saveFrame(_ d: GazeEffect.Debug) {
-        guard let dir = datasetDir, let raw = pipeline?.stats.raw else { return }
+        guard let dir = datasetDir, let raw = pipeline?.stats.raw, raw !== lastSaved else { return }
+        lastSaved = raw // timer is 30 Hz, the camera often ~24 fps: don't save the same frame twice
         let p = points[step]
         let dist = d.eyeDistanceCm > 0 ? d.eyeDistanceCm : 65
         // Camera position from the gaze settings (y negative = above the screen centre).
