@@ -105,14 +105,17 @@ struct PreviewWindow: View {
     private var gazeSettings: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Погляд у камеру").font(.headline)
-            Picker("Модель", selection: $model.gaze.userModel) {
+            // Labels above, not beside: the 300-pt sidebar can't fit a label next to two long segments.
+            Text("Модель корекції").font(.caption)
+            Picker("Модель корекції", selection: $model.gaze.userModel) {
                 Text("стандартна").tag(false)
                 Text("моя (fine-tune)").tag(true)
-            }.pickerStyle(.segmented)
-            Picker("Куди дивлюсь", selection: $model.gaze.useEstimator) {
-                Text("моя модель погляду").tag(true)
+            }.pickerStyle(.segmented).labelsHidden()
+            Text("Куди дивлюсь — оцінка").font(.caption)
+            Picker("Куди дивлюсь — оцінка", selection: $model.gaze.useEstimator) {
+                Text("моя модель").tag(true)
                 Text("зіниці (Vision)").tag(false)
-            }.pickerStyle(.segmented)
+            }.pickerStyle(.segmented).labelsHidden()
             slider("Камера над центром екрана", value: $model.gaze.cameraUp, range: 0...40, unit: "см")
             slider("Камера вбік від центру", value: $model.gaze.cameraRight, range: -30...30, unit: "см")
             slider("Камера перед екраном", value: $model.gaze.cameraDepth, range: -10...10, unit: "см")
