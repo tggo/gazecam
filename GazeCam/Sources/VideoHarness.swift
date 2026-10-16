@@ -17,6 +17,7 @@ enum VideoHarness {
         if let j = args.firstIndex(of: "--follow"), args.count > j + 1, let f = Float(args[j + 1]) { gaze.followGaze = f }
         if let j = args.firstIndex(of: "--neutral"), args.count > j + 1, let n = Float(args[j + 1]) { gaze.setNeutral(n) }
         if args.contains("--user") { gaze.useUserModel = true }
+        if args.contains("--no-est") { gaze.useEstimator = false }
         let cap = DebugCapture()
         guard let tmp = cap.startRecording() else { print("writer failed"); exit(1) }
         let ctx = CIContext()

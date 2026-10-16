@@ -86,3 +86,54 @@ cp -R export_finetuned/GazeWarpR.mlpackage export_finetuned/GazeWarpL.mlpackage 
 cd ~/code/gazecam && make dev
 ```
 Names/shapes are unchanged, so no Swift change. The `maxRedirect = 20` cap in the app still applies.
+
+---
+# Gaze estimator (replaces the Vision pupil/eyelid heuristic)
+
+Files: `estimator_data.py` (frame crops/labels), `estimator_model.py` (net), `train_estimator.py`, `export_estimator.py`.
+Final run: `runs/est3_lm/` (best.pt, metrics.json with per-point medians); Core ML: `export_estimator/GazeEstimator.mlpackage`.
+
+```
+$PY train_estimator.py --epochs 60 --patience 100 --out runs/est3_lm      # add --no-lm for the crops-only variant
+$PY export_estimator.py --ckpt runs/est3_lm/best.pt --out export_estimator
+```
+
+## Contract (sign convention)
+Model output `gaze = [gaze_v, gaze_h]` in degrees, identical to the labels `[target_v_deg, target_h_deg]` (camera frames: target = cam).
+The warp angle fed to GazeWarp is therefore
+```
+ang_v = cam_v - gaze_v        ang_h = gaze_h - cam_h        (measured best sign (+,-), see "Angle sign" above)
+```
+Inputs (all float32): `eyeR` (1,48,64,3) = crop of the image-left eye, `eyeL` (1,48,64,3) = image-right eye, built exactly like the
+warp models' `img` (crops.py = GazeEffect.correct, BGR [0,1], no flipping); `lm` (1,27): from the 12 smoothed-or-raw eye points (image px):
+cR = mean(pt0, pt3), cL = mean(pt6, pt9), mid = (cR+cL)/2, iod = |cL-cR|; first 24 numbers = (pt_i - mid)/iod in order x0 y0 x1 y1 ...;
+then mid_x/frame_w - 0.5, mid_y/frame_h - 0.5, 10*iod/frame_w. (27, not 24: the last 3 carry head position/distance, which the angle needs.)
+Note: trained on RAW per-frame landmarks; the app's EMA-smoothed points will be slightly steadier, not systematically different.
+
+## Data
+Split by session. train: 19-06-53, 19-07-46, 19-08-34, 19-10-17 (2415 frames); val: 19-09-30 (572); test: 19-11-19, 52 cm, never used for
+any choice (560). Dropped: md5 duplicates, first 6 frames of each point block, blinks (openness < 0.5 x median), frames whose crop leaves the
+frame, near-identical consecutive crops. Augmentation (train only): crop shift +-2 px, scale 0.95-1.05, brightness/contrast/gamma, lm noise.
+Camera-look frames are ~31% of val/test frames (one long block per cycle), so overall MAE is weighted toward them.
+
+## Results (MAE in degrees, all kept frames of the session; mean over frames)
+| | val v | val h | test v | test h |
+|---|---|---|---|---|
+| **estimator (est3_lm, EMA weights, best epoch 30 chosen on val)** | 2.46 | 2.91 | 4.55 | 2.85 |
+| app baseline (h = -(pupil_x - median camera pupil_x)/0.0028, v = 0) | 9.54 | 5.36 | 12.29 | 6.37 |
+| constant = train median | 8.25 | 12.16 | 10.77 | 16.00 |
+
+Per-point median |error| is in `runs/est3_lm/metrics.json` (also the baseline's). Test, model vs baseline, selected points (v/h deg):
+camera 5.0/0.1 vs 19.4/1.2; right 2.5/4.3 vs 0.0/14.2; top-left 4.4/8.4 vs 16.2/10.5; top-centre 4.3/0.1 vs 16.5/6.9; centre 5.4/1.8 vs 0.0/1.9.
+The baseline's v = 0 is exactly right on the three v=0 points (centre/left/right), so its vertical error there is zero by construction.
+
+Caveats, measured: results swing a lot between runs (5 configs/seeds tried; val h 2.2-5.1, test v 3.4-4.8, test h 1.6-2.9), because training has only 4 sessions of
+one person. The reported row is the run with the best val among those with the final recipe (EMA); an earlier non-EMA run happened to give a better test
+(v 3.42 / h 1.64) but a worse val, so it was not picked. Vertical is the weak axis on test (4.5 deg; the camera-look frames sit ~5 deg off, i.e. the 15 deg
+camera-vs-centre difference is only partly resolved at 52 cm). The crops-only variant (`--no-lm`) was worse on val in the same recipe (3.08/3.61).
+Expect to retrain per user/setup; there is no temporal smoothing here (the app should low-pass the output).
+
+## Core ML
+`GazeEstimator.mlpackage` (291k params, macOS14, fp32): inputs eyeR, eyeL, lm; output `gaze` (1,2) [v,h]. torch vs Core ML max diff 1.3e-5 deg
+(8 random inputs). Timing, `predict` median over 300 calls from Python (includes call overhead): CPU+ANE 0.12 ms (p95 0.15), CPU-only 0.12 ms,
+ALL 0.47 ms. Well under the 3 ms budget. Not installed in the app.

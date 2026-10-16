@@ -109,6 +109,10 @@ struct PreviewWindow: View {
                 Text("стандартна").tag(false)
                 Text("моя (fine-tune)").tag(true)
             }.pickerStyle(.segmented)
+            Picker("Куди дивлюсь", selection: $model.gaze.useEstimator) {
+                Text("моя модель погляду").tag(true)
+                Text("зіниці (Vision)").tag(false)
+            }.pickerStyle(.segmented)
             slider("Камера над центром екрана", value: $model.gaze.cameraUp, range: 0...40, unit: "см")
             slider("Камера вбік від центру", value: $model.gaze.cameraRight, range: -30...30, unit: "см")
             slider("Камера перед екраном", value: $model.gaze.cameraDepth, range: -10...10, unit: "см")
@@ -182,6 +186,7 @@ struct PreviewWindow: View {
             row("Відкритість / звичайна", String(format: "%.2f / %.2f", d.openness, d.usualOpenness))
             row("Зіниця / нейтраль", [d.pupilX, d.neutralX].map { $0.map { String(format: "%+.3f", $0) } ?? "—" }.joined(separator: " / "))
             row("Гасіння гор / верт", String(format: "%+.1f° / %+.1f°", d.followDeg, d.followVDeg))
+            row("Погляд (модель) верт/гор", d.gazeEst.map { String(format: "%+.1f° / %+.1f°", $0.0, $0.1) } ?? "—")
             row("Повіки → погляд", String(format: "%.2f× → %+.1f°", d.openRatio, d.gazeUpDeg))
             row("Рух очей", String(format: "%.1f px/кадр%@", d.motionPx, d.smoothingReset ? " (скид)" : ""))
         }

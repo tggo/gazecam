@@ -77,6 +77,7 @@ final class GazeEffect: Effect {
         var openRatio: Float = 1
         var gazeUpDeg: Float = 0
         var followVDeg: Float = 0
+        var gazeEst: (Float, Float)?
         var openness: Float = 0
         var usualOpenness: Float = 0
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
@@ -93,6 +94,15 @@ final class GazeEffect: Effect {
     private let request = VNDetectFaceLandmarksRequest()
     private var models: [Side: MLModel] = [:]
     private var stockModels: [Side: MLModel] = [:]
+    private var estimator: MLModel?
+    private let estR = try! MLMultiArray(shape: [1, 48, 64, 3], dataType: .float32)
+    private let estL = try! MLMultiArray(shape: [1, 48, 64, 3], dataType: .float32)
+    private let estLm = try! MLMultiArray(shape: [1, 27], dataType: .float32)
+    private var gazeEst: (Float, Float)?
+    private var estimatorMs: Double = 0
+    /// Use the learned per-user gaze estimator (GazeEstimator.mlmodelc) instead of pupil/lid heuristics.
+    var useEstimator = false
+    var hasEstimator: Bool { estimator != nil }
     private var userModels: [Side: MLModel] = [:]
     /// Weights fine-tuned on this user's dataset runs (train/, GazeWarpUser{L,R}) instead of the stock ones.
     var useUserModel = false {
@@ -127,6 +137,9 @@ final class GazeEffect: Effect {
             }
         }
         stockModels = models
+        if let url = Bundle.main.url(forResource: "GazeEstimator", withExtension: "mlmodelc") {
+            estimator = try? MLModel(contentsOf: url, configuration: cfg)
+        }
         if models.count != 2 { NSLog("GazeCam: gaze models missing"); enabled = false }
     }
 
@@ -190,6 +203,14 @@ final class GazeEffect: Effect {
         }
 
         let cR = mid(imgLeftEye[0], imgLeftEye[3]), cL = mid(imgRightEye[0], imgRightEye[3])
+
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return }
+        let frame = Frame(base: base, rowBytes: CVPixelBufferGetBytesPerRow(buffer), width: w, height: h)
+        guard let cropR = cropEye(frame, points: imgLeftEye, center: cR),
+              let cropL = cropEye(frame, points: imgRightEye, center: cL)
+        else { d.status = "око біля краю кадру — пропуск"; return }
         var angle = angleOverride ?? gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
         angle = (angle.0 * strength, angle.1 * strength)
         if !reset, let pa = prevAngle {
@@ -241,14 +262,25 @@ final class GazeEffect: Effect {
         d.followDeg = followH * fade
         d.followVDeg = followV * fade
         angle = (angle.0 + followV * fade, angle.1 + followH * fade)
-        d.angle = angle
         d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
 
-        CVPixelBufferLockBaseAddress(buffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return }
-        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
-        let frame = Frame(base: base, rowBytes: rowBytes, width: w, height: h)
+        // Learned per-user gaze (train/estimator): replaces both the geometric base and the pupil/lid heuristics.
+        // Warp angle = (cam_v − gaze_v, gaze_h − cam_h), the sign measured on the dataset pairs.
+        if angleOverride == nil, useEstimator, let g = estimateGaze(cropR, cropL, points: imgLeftEye + imgRightEye, w: w, h: h) {
+            let kg = reset ? 0 : min(smoothing, 0.3)
+            let sg = gazeEst.map { ($0.0 * kg + g.0 * (1 - kg), $0.1 * kg + g.1 * (1 - kg)) } ?? g
+            gazeEst = sg
+            let dist = max(d.eyeDistanceCm, 20)
+            let camV = Float(atan(-cameraOffset.y / dist) * 180 / .pi), camH = Float(atan(cameraOffset.x / dist) * 180 / .pi)
+            var a = ((camV - sg.0) * followGaze, (sg.1 - camH) * followGaze)
+            let needE = hypot(a.0 * maxRedirectH / maxRedirect, a.1)
+            let fadeE = min(max((1.7 * maxRedirectH - needE) / (0.5 * maxRedirectH), 0), 1)
+            a = (a.0 * fadeE, a.1 * fadeE)
+            angle = a
+            d.gazeEst = sg
+            d.followDeg = a.1; d.followVDeg = a.0
+        }
+        d.angle = angle
 
         // Past ~20° total the network rolls the iris under the lid (white-eye look): cap the vector, not each axis.
         // Elliptical cap: measured on the user fine-tune, pulling the iris toward centre holds up to ~30°
@@ -259,11 +291,32 @@ final class GazeEffect: Effect {
         d.angle = angle
 
         let t1 = CACurrentMediaTime()
-        let boxes = [correct(frame, points: imgLeftEye, center: cR, side: .R, seq: [0, 1, 2, 3, 4, 5], angle: angle),
-                     correct(frame, points: imgRightEye, center: cL, side: .L, seq: [3, 2, 1, 0, 5, 4], angle: angle)]
+        let boxes = [correct(frame, crop: cropR, points: imgLeftEye, side: .R, seq: [0, 1, 2, 3, 4, 5], angle: angle),
+                     correct(frame, crop: cropL, points: imgRightEye, side: .L, seq: [3, 2, 1, 0, 5, 4], angle: angle)]
         d.modelMs = (CACurrentMediaTime() - t1) * 1000
         d.eyeBoxes = boxes.compactMap { $0 }
         d.status = d.eyeBoxes.count == 2 ? "корекція активна" : "око біля краю кадру — пропуск"
+    }
+
+    // MARK: - Gaze estimator
+
+    /// [v, h] degrees from both eye crops + 27 landmark features (train/estimator_data.py lm_features).
+    private func estimateGaze(_ r: EyeCrop, _ l: EyeCrop, points lm: [CGPoint], w: Int, h: Int) -> (Float, Float)? {
+        guard let est = estimator, lm.count == 12 else { return nil }
+        let t0 = CACurrentMediaTime()
+        func fill(_ a: MLMultiArray, _ v: [Float]) { v.withUnsafeBufferPointer { a.dataPointer.assumingMemoryBound(to: Float.self).update(from: $0.baseAddress!, count: v.count) } }
+        fill(estR, r.src); fill(estL, l.src)
+        let cR = mid(lm[0], lm[3]), cL = mid(lm[6], lm[9])
+        let m = mid(cR, cL), iod = max(hypot(cL.x - cR.x, cL.y - cR.y), 1)
+        var f = lm.flatMap { [Float(($0.x - m.x) / iod), Float(($0.y - m.y) / iod)] }
+        f += [Float(m.x / CGFloat(w) - 0.5), Float(m.y / CGFloat(h) - 0.5), Float(10 * iod / CGFloat(w))]
+        fill(estLm, f)
+        guard let input = try? MLDictionaryFeatureProvider(dictionary: ["eyeR": estR, "eyeL": estL, "lm": estLm]),
+              let out = try? est.prediction(from: input), let g = out.featureValue(for: "gaze")?.multiArrayValue
+        else { return nil }
+        let v = g.toFloats()
+        estimatorMs = (CACurrentMediaTime() - t0) * 1000
+        return (v[0], v[1])
     }
 
     // MARK: - Geometry
@@ -322,8 +375,10 @@ final class GazeEffect: Effect {
         @inline(__always) func px(_ x: Int, _ y: Int) -> UnsafeMutablePointer<UInt8> { base + y * rowBytes + x * 4 }
     }
 
-    @discardableResult
-    private func correct(_ f: Frame, points: [CGPoint], center: CGPoint, side: Side, seq: [Int], angle: (Float, Float)) -> CGRect? {
+    struct EyeCrop { var src: [Float]; let top, left, oh, ow: Int }
+
+    /// The 48x64 BGR [0,1] eye crop both networks take (cv2.resize INTER_LINEAR sampling), box from the eye corners.
+    private func cropEye(_ f: Frame, points: [CGPoint], center: CGPoint) -> EyeCrop? {
         let eyeLen = abs(points[3].x - points[0].x)
         let halfW = eyeLen * 3 / 4, boxH = 1.5 * halfW
         let top = Int(center.y - boxH * 7 / 12), bottom = Int(center.y + boxH * 5 / 12)
@@ -332,8 +387,6 @@ final class GazeEffect: Effect {
         let oh = bottom - top, ow = right - left
         guard oh >= 12, ow >= 16 else { return nil }
 
-        // Crop → 48x64 BGR [0,1] (cv2.resize INTER_LINEAR sampling).
-        let img = imgArr.dataPointer.assumingMemoryBound(to: Float.self)
         var src = [Float](repeating: 0, count: H * W * 3)
         let sx = Float(ow) / Float(W), sy = Float(oh) / Float(H)
         for y in 0..<H {
@@ -351,6 +404,13 @@ final class GazeEffect: Effect {
                 }
             }
         }
+        return EyeCrop(src: src, top: top, left: left, oh: oh, ow: ow)
+    }
+
+    @discardableResult
+    private func correct(_ f: Frame, crop: EyeCrop, points: [CGPoint], side: Side, seq: [Int], angle: (Float, Float)) -> CGRect? {
+        let src = crop.src, top = crop.top, left = crop.left, oh = crop.oh, ow = crop.ow
+        let img = imgArr.dataPointer.assumingMemoryBound(to: Float.self)
         src.withUnsafeBufferPointer { img.update(from: $0.baseAddress!, count: src.count) }
 
         // Anchor map: for each point, (col - px, row - py) in 48x64 space.

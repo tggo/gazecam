@@ -41,6 +41,7 @@ struct GazeSettings: Codable, Equatable {
     var schema = 2
     var userModel = false
     var pupilAtCamera: Double?
+    var useEstimator = false
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -63,6 +64,7 @@ struct GazeSettings: Codable, Equatable {
         vCal = try c.decodeIfPresent(GazeEffect.VerticalCal.self, forKey: .vCal)
         userModel = try c.decodeIfPresent(Bool.self, forKey: .userModel) ?? false
         pupilAtCamera = try c.decodeIfPresent(Double.self, forKey: .pupilAtCamera)
+        useEstimator = try c.decodeIfPresent(Bool.self, forKey: .useEstimator) ?? false
         // Schema 1 → 2: strength >1 inflated the geometric base past the cap (28° → white eyes), and the closed-eye
         // ratio 0.6 caught normal downward looks. Reset both once.
         if (try c.decodeIfPresent(Int.self, forKey: .schema)) == nil { strength = 1; openRatio = d.openRatio }
@@ -113,6 +115,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.openRatio = Float(gaze.openRatio)
         g.vCal = gaze.vCal ?? GazeEffect.VerticalCal()
         if g.useUserModel != gaze.userModel { g.useUserModel = gaze.userModel }
+        g.useEstimator = gaze.useEstimator
         if let p = gaze.pupilAtCamera, g.neutralX != Float(p) { g.setNeutral(Float(p)) }
     }
 
