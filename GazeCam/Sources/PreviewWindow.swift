@@ -105,6 +105,10 @@ struct PreviewWindow: View {
     private var gazeSettings: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Погляд у камеру").font(.headline)
+            Picker("Модель", selection: $model.gaze.userModel) {
+                Text("стандартна").tag(false)
+                Text("моя (fine-tune)").tag(true)
+            }.pickerStyle(.segmented)
             slider("Камера над центром екрана", value: $model.gaze.cameraUp, range: 0...40, unit: "см")
             slider("Камера вбік від центру", value: $model.gaze.cameraRight, range: -30...30, unit: "см")
             slider("Камера перед екраном", value: $model.gaze.cameraDepth, range: -10...10, unit: "см")

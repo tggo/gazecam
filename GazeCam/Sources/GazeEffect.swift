@@ -90,6 +90,10 @@ final class GazeEffect: Effect {
     private let H = 48, W = 64
     private let request = VNDetectFaceLandmarksRequest()
     private var models: [Side: MLModel] = [:]
+    private var stockModels: [Side: MLModel] = [:]
+    private var userModels: [Side: MLModel] = [:]
+    /// Weights fine-tuned on this user's dataset runs (train/, GazeWarpUser{L,R}) instead of the stock ones.
+    var useUserModel = false { didSet { models = useUserModel && userModels.count == 2 ? userModels : stockModels } }
     private let imgArr: MLMultiArray
     private let fpArr: MLMultiArray
     private let angArr: MLMultiArray
@@ -102,11 +106,20 @@ final class GazeEffect: Effect {
         angArr = try! MLMultiArray(shape: [1, 2], dataType: .float32)
         let cfg = MLModelConfiguration()
         cfg.computeUnits = .cpuAndNeuralEngine
+        // GAZECAM_MODEL_DIR=<dir with GazeWarp{L,R}.mlpackage> swaps in other weights (A/B in the test harness).
+        let overrideDir = ProcessInfo.processInfo.environment["GAZECAM_MODEL_DIR"]
         for side in [Side.L, .R] {
-            if let url = Bundle.main.url(forResource: "GazeWarp\(side.rawValue)", withExtension: "mlmodelc") {
+            if let dir = overrideDir,
+               let compiled = try? MLModel.compileModel(at: URL(fileURLWithPath: dir).appendingPathComponent("GazeWarp\(side.rawValue).mlpackage")) {
+                models[side] = try? MLModel(contentsOf: compiled, configuration: cfg)
+            } else if let url = Bundle.main.url(forResource: "GazeWarp\(side.rawValue)", withExtension: "mlmodelc") {
                 models[side] = try? MLModel(contentsOf: url, configuration: cfg)
             }
+            if let url = Bundle.main.url(forResource: "GazeWarpUser\(side.rawValue)", withExtension: "mlmodelc") {
+                userModels[side] = try? MLModel(contentsOf: url, configuration: cfg)
+            }
         }
+        stockModels = models
         if models.count != 2 { NSLog("GazeCam: gaze models missing"); enabled = false }
     }
 

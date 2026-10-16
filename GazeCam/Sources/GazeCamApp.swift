@@ -38,6 +38,7 @@ struct GazeSettings: Codable, Equatable {
     var openRatio = 0.4
     var vCal: GazeEffect.VerticalCal?
     var schema = 2
+    var userModel = false
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -57,6 +58,7 @@ struct GazeSettings: Codable, Equatable {
         maxRedirect = try c.decodeIfPresent(Double.self, forKey: .maxRedirect) ?? d.maxRedirect
         openRatio = try c.decodeIfPresent(Double.self, forKey: .openRatio) ?? d.openRatio
         vCal = try c.decodeIfPresent(GazeEffect.VerticalCal.self, forKey: .vCal)
+        userModel = try c.decodeIfPresent(Bool.self, forKey: .userModel) ?? false
         // Schema 1 → 2: strength >1 inflated the geometric base past the cap (28° → white eyes), and the closed-eye
         // ratio 0.6 caught normal downward looks. Reset both once.
         if (try c.decodeIfPresent(Int.self, forKey: .schema)) == nil { strength = 1; openRatio = d.openRatio }
@@ -104,6 +106,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.maxRedirect = Float(gaze.maxRedirect)
         g.openRatio = Float(gaze.openRatio)
         g.vCal = gaze.vCal ?? GazeEffect.VerticalCal()
+        if g.useUserModel != gaze.userModel { g.useUserModel = gaze.userModel }
     }
 
     let calibration = CornerCalibration()
