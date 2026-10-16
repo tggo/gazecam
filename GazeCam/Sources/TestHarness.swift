@@ -43,6 +43,21 @@ enum TestHarness {
             let n = effectID == "gaze" ? 1 : 3 // gaze warps the frame in place, so one timed pass
             for _ in 0..<n { effect.apply(to: pb!) }
             if let g = gazeEffect { print("status:", g.debug.status, String(format: "openness %.3f", g.debug.openness)) }
+            if let g = gazeEffect, args.contains("--profile") {
+                // 50 passes on fresh copies of the frame, per-stage averages.
+                g.profile = [:]
+                var tv = 0.0
+                for _ in 0..<50 {
+                    var c: CVPixelBuffer?
+                    CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &c)
+                    ctx.render(img, to: c!)
+                    let t = Date(); g.apply(to: c!); tv += Date().timeIntervalSince(t) * 1000
+                    _ = g.debug
+                }
+                print(String(format: "total %.2f ms/frame", tv / 50))
+                for (k, v) in g.profile.sorted(by: { $0.value > $1.value }) { print(String(format: "  %-7@ %.2f ms", k, v / 50)) }
+                print(String(format: "  vision  %.2f ms (last)", g.debug.visionMs))
+            }
             print(String(format: "%@ applied, %.1f ms/frame", effectID, Date().timeIntervalSince(t0) * 1000 / Double(n)))
         }
 

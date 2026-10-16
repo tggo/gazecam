@@ -100,6 +100,8 @@ final class GazeEffect: Effect {
     private let estLm = try! MLMultiArray(shape: [1, 27], dataType: .float32)
     private var gazeEst: (Float, Float)?
     private var estimatorMs: Double = 0
+    /// Accumulated ms per stage (both eyes) since last reset — for profiling via the test harness.
+    var profile: [String: Double] = [:]
     /// Use the learned per-user gaze estimator (GazeEstimator.mlmodelc) instead of pupil/lid heuristics.
     var useEstimator = false
     var hasEstimator: Bool { estimator != nil }
@@ -208,9 +210,12 @@ final class GazeEffect: Effect {
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return }
         let frame = Frame(base: base, rowBytes: CVPixelBufferGetBytesPerRow(buffer), width: w, height: h)
+        let tc = CACurrentMediaTime()
+        defer { _ = tc }
         guard let cropR = cropEye(frame, points: imgLeftEye, center: cR),
               let cropL = cropEye(frame, points: imgRightEye, center: cL)
         else { d.status = "око біля краю кадру — пропуск"; return }
+        profile["crop", default: 0] += (CACurrentMediaTime() - tc) * 1000
         var angle = angleOverride ?? gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
         angle = (angle.0 * strength, angle.1 * strength)
         if !reset, let pa = prevAngle {
@@ -413,6 +418,8 @@ final class GazeEffect: Effect {
         let img = imgArr.dataPointer.assumingMemoryBound(to: Float.self)
         src.withUnsafeBufferPointer { img.update(from: $0.baseAddress!, count: src.count) }
 
+        var tp = CACurrentMediaTime()
+        func lap(_ k: String) { let n = CACurrentMediaTime(); profile[k, default: 0] += (n - tp) * 1000; tp = n }
         // Anchor map: for each point, (col - px, row - py) in 48x64 space.
         let fp = fpArr.dataPointer.assumingMemoryBound(to: Float.self)
         let anchors = seq.map { i -> (Float, Float) in
@@ -431,6 +438,7 @@ final class GazeEffect: Effect {
         let ang = angArr.dataPointer.assumingMemoryBound(to: Float.self)
         ang[0] = angle.0; ang[1] = angle.1
 
+        lap("anchor")
         guard let input = try? MLDictionaryFeatureProvider(dictionary: ["img": imgArr, "fp": fpArr, "ang": angArr]),
               let out = try? models[side]!.prediction(from: input),
               let flowA = out.featureValue(for: "flow")?.multiArrayValue,
@@ -438,6 +446,7 @@ final class GazeEffect: Effect {
         else { return nil }
         let fl = flowA.toFloats(), lc = lcmA.toFloats()
 
+        lap("coreml")
         // Backward warp + light correction (same as convert_gaze.py warp()).
         var dst = [Float](repeating: 0, count: H * W * 3)
         for y in 0..<H {
@@ -460,6 +469,7 @@ final class GazeEffect: Effect {
             }
         }
 
+        lap("warp")
         // Paste back at original size; the original hard-cuts a (3,4) px border, we feather it instead.
         let cutY = 3, cutX = 4, feather = max(self.feather, 0.5)
         let rx = Float(W) / Float(ow), ry = Float(H) / Float(oh)
@@ -481,6 +491,7 @@ final class GazeEffect: Effect {
                 }
             }
         }
+        lap("paste")
         return CGRect(x: left, y: top, width: ow, height: oh)
     }
 }

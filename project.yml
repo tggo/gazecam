@@ -9,6 +9,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ARCHS: arm64 # Apple Silicon only: Core ML fp16 path uses Float16, unavailable on x86_64
     DEVELOPMENT_TEAM: 4JV3A5SUSZ
     CODE_SIGN_STYLE: Automatic
     CODE_SIGN_IDENTITY: "Apple Development"

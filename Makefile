@@ -1,7 +1,7 @@
 # GazeCam — menu-bar app + CoreMediaIO camera extension (virtual camera).
 # System extensions only activate from /Applications, so `make dev` installs there.
 APP        := GazeCam
-CONFIG     ?= Debug
+CONFIG     ?= Release
 DERIVED    := build/DerivedData
 APP_PATH   := $(DERIVED)/Build/Products/$(CONFIG)/$(APP).app
 INSTALL_TO ?= /Applications
