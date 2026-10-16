@@ -119,7 +119,8 @@ struct PreviewWindow: View {
             slider("Розмиття краю вставки", value: $model.gaze.feather, range: 0...8, unit: "px", digits: 1)
             slider("Згладжування руху", value: $model.gaze.smoothing, range: 0...0.9, unit: "", digits: 2)
             slider("Гасити рухи очей (читання)", value: $model.gaze.followGaze, range: 0...1.5, unit: "×", digits: 2)
-            slider("Макс. поворот погляду", value: $model.gaze.maxRedirect, range: 5...25, unit: "°")
+            slider("Макс. поворот: вертикаль", value: $model.gaze.maxRedirect, range: 5...25, unit: "°")
+            slider("Макс. поворот: горизонталь", value: $model.gaze.maxRedirectH, range: 5...40, unit: "°")
             slider("Поріг «очі закриті» (від звичайних)", value: $model.gaze.openRatio, range: 0.3...0.9, unit: "×", digits: 2)
             Button(model.calibration.running ? "Калібрую…" : "Калібрувати по кутах екрана") { model.startCalibration() }
                 .disabled(model.calibration.running || !model.running)

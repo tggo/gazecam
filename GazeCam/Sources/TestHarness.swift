@@ -32,6 +32,7 @@ enum TestHarness {
                 let v = args[j + 1].split(separator: ",").compactMap { Float($0) }
                 gazeEffect?.angleOverride = (v[0], v[1])
                 gazeEffect?.smoothing = 0
+                if let k = args.firstIndex(of: "--max"), args.count > k + 1, let m = Float(args[k + 1]) { gazeEffect?.maxRedirect = m }
             }
             effect.enabled = true
             var warm: CVPixelBuffer? // warm-up on a copy: Vision + Core ML first-run costs

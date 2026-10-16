@@ -36,6 +36,7 @@ final class GazeEffect: Effect {
     var pupilPerDegree: Float = 0.0022
     /// Hard cap on the redirect, both axes; the network was trained on roughly ±20°.
     var maxRedirect: Float = 20
+    var maxRedirectH: Float = 30
     /// "Looking at the screen" pupil position. Drifts slowly toward the running average; calibrate() pins it.
     private(set) var neutralX: Float?
     /// Set by corner calibration; stops the slow auto-drift of the neutral.
@@ -229,9 +230,9 @@ final class GazeEffect: Effect {
         // A look far beyond what the network can undo is deliberate (looking away): let it through,
         // fading the follow out between 1× and 1.6× the cap instead of a half-corrected rolled eye.
         // Judged on the follow alone — the geometric base is constant and must not switch following off.
-        let need = hypot(followV, followH)
+        let need = hypot(followV * maxRedirectH / maxRedirect, followH)
         // Up to 1.5× the cap: follow, clamped by the vector cap below. Fade out by 2.2×: a real look away.
-        let fade = min(max((2.2 * maxRedirect - need) / (0.7 * maxRedirect), 0), 1)
+        let fade = min(max((1.7 * maxRedirectH - need) / (0.5 * maxRedirectH), 0), 1)
         d.followDeg = followH * fade
         d.followVDeg = followV * fade
         angle = (angle.0 + followV * fade, angle.1 + followH * fade)
@@ -245,8 +246,11 @@ final class GazeEffect: Effect {
         let frame = Frame(base: base, rowBytes: rowBytes, width: w, height: h)
 
         // Past ~20° total the network rolls the iris under the lid (white-eye look): cap the vector, not each axis.
-        let mag = hypot(angle.0, angle.1)
-        if mag > maxRedirect { angle = (angle.0 * maxRedirect / mag, angle.1 * maxRedirect / mag) }
+        // Elliptical cap: measured on the user fine-tune, pulling the iris toward centre holds up to ~30°
+        // horizontally (breaks at 40°); vertical stays at maxRedirect.
+        let capH = maxRedirectH, capV = maxRedirect
+        let mag = hypot(angle.0 / capV, angle.1 / capH)
+        if mag > 1 { angle = (angle.0 / mag, angle.1 / mag) }
         d.angle = angle
 
         let t1 = CACurrentMediaTime()

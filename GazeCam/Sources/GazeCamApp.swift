@@ -35,6 +35,7 @@ struct GazeSettings: Codable, Equatable {
     var smoothing = 0.6
     var followGaze = 1.0
     var maxRedirect = 20.0
+    var maxRedirectH = 30.0
     var openRatio = 0.4
     var vCal: GazeEffect.VerticalCal?
     var schema = 2
@@ -57,6 +58,7 @@ struct GazeSettings: Codable, Equatable {
         smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
         followGaze = try c.decodeIfPresent(Double.self, forKey: .followGaze) ?? d.followGaze
         maxRedirect = try c.decodeIfPresent(Double.self, forKey: .maxRedirect) ?? d.maxRedirect
+        maxRedirectH = try c.decodeIfPresent(Double.self, forKey: .maxRedirectH) ?? d.maxRedirectH
         openRatio = try c.decodeIfPresent(Double.self, forKey: .openRatio) ?? d.openRatio
         vCal = try c.decodeIfPresent(GazeEffect.VerticalCal.self, forKey: .vCal)
         userModel = try c.decodeIfPresent(Bool.self, forKey: .userModel) ?? false
@@ -107,6 +109,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.smoothing = Float(gaze.smoothing)
         g.followGaze = Float(gaze.followGaze)
         g.maxRedirect = Float(gaze.maxRedirect)
+        g.maxRedirectH = Float(gaze.maxRedirectH)
         g.openRatio = Float(gaze.openRatio)
         g.vCal = gaze.vCal ?? GazeEffect.VerticalCal()
         if g.useUserModel != gaze.userModel { g.useUserModel = gaze.userModel }
