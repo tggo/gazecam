@@ -116,6 +116,7 @@ struct PreviewWindow: View {
             slider("Згладжування руху", value: $model.gaze.smoothing, range: 0...0.9, unit: "", digits: 2)
             slider("Гасити рухи очей (читання)", value: $model.gaze.followGaze, range: 0...1.5, unit: "×", digits: 2)
             slider("Макс. поворот погляду", value: $model.gaze.maxRedirect, range: 5...25, unit: "°")
+            slider("Поріг «очі закриті»", value: $model.gaze.minOpenness, range: 0.05...0.35, unit: "", digits: 2)
             Button(feed.gazeDebug.calibrating ? "Дивись у центр екрана…" : "Калібрувати: дивлюсь у центр екрана") {
                 model.pipeline.gaze.calibrate()
             }.font(.caption)
@@ -169,6 +170,7 @@ struct PreviewWindow: View {
             row("Yaw / pitch", [d.yawDeg, d.pitchDeg].map { $0.map { String(format: "%.0f°", $0) } ?? "—" }.joined(separator: " / "))
             row("Кут корекції (верт / гор)", String(format: "%.0f° / %.0f°", d.angle.v, d.angle.h))
             row("Відстань до очей", d.eyeDistanceCm > 0 ? String(format: "%.0f см", d.eyeDistanceCm) : "—")
+            row("Відкритість очей", String(format: "%.2f", d.openness))
             row("Зіниця / нейтраль", [d.pupilX, d.neutralX].map { $0.map { String(format: "%+.3f", $0) } ?? "—" }.joined(separator: " / "))
             row("Гасіння руху", String(format: "%+.1f°", d.followDeg))
             row("Рух очей", String(format: "%.1f px/кадр%@", d.motionPx, d.smoothingReset ? " (скид)" : ""))

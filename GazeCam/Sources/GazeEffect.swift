@@ -43,6 +43,10 @@ final class GazeEffect: Effect {
     /// Collect ~2 s of pupil positions while the user looks at the screen centre.
     func calibrate() { calibrating = [] }
 
+    /// Eye aspect ratio below which the eyes count as closed (blink, looking far down): no correction —
+    /// Vision invents pupils on a closed lid and the network paints an eye over it.
+    var minOpenness: Float = 0.12
+
     /// Fixed [vertical, horizontal] redirection for experiments (test harness).
     var angleOverride: (Float, Float)?
 
@@ -61,6 +65,7 @@ final class GazeEffect: Effect {
         var pupilX: Float?, neutralX: Float?
         var followDeg: Float = 0
         var calibrating = false
+        var openness: Float = 0
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
         var eyePoints: [CGPoint] = []
         var faceBox: CGRect?
@@ -136,6 +141,19 @@ final class GazeEffect: Effect {
         d.smoothingReset = reset
         prevPoints = cur
         let imgLeftEye = Array(cur[0..<6]), imgRightEye = Array(cur[6..<12])
+        d.eyePoints = imgLeftEye + imgRightEye
+
+        // Eye aspect ratio on the 6-point layout: (|p1-p5| + |p2-p4|) / (2 |p0-p3|), averaged over both eyes.
+        func ear(_ e: [CGPoint]) -> Float {
+            let v = hypot(e[1].x - e[5].x, e[1].y - e[5].y) + hypot(e[2].x - e[4].x, e[2].y - e[4].y)
+            return Float(v / max(2 * hypot(e[0].x - e[3].x, e[0].y - e[3].y), 1))
+        }
+        d.openness = (ear(imgLeftEye) + ear(imgRightEye)) / 2
+        if d.openness < minOpenness {
+            d.status = "очі закриті — пропуск"
+            prevAngle = nil
+            return
+        }
 
         let cR = mid(imgLeftEye[0], imgLeftEye[3]), cL = mid(imgRightEye[0], imgRightEye[3])
         var angle = angleOverride ?? gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
@@ -170,7 +188,6 @@ final class GazeEffect: Effect {
         }
         d.angle = angle
         d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
-        d.eyePoints = imgLeftEye + imgRightEye
 
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }

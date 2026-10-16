@@ -34,6 +34,7 @@ struct GazeSettings: Codable, Equatable {
     var smoothing = 0.6
     var followGaze = 1.0
     var maxRedirect = 20.0
+    var minOpenness = 0.12
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -51,6 +52,7 @@ struct GazeSettings: Codable, Equatable {
         smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
         followGaze = try c.decodeIfPresent(Double.self, forKey: .followGaze) ?? d.followGaze
         maxRedirect = try c.decodeIfPresent(Double.self, forKey: .maxRedirect) ?? d.maxRedirect
+        minOpenness = try c.decodeIfPresent(Double.self, forKey: .minOpenness) ?? d.minOpenness
     }
 }
 
@@ -91,6 +93,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.smoothing = Float(gaze.smoothing)
         g.followGaze = Float(gaze.followGaze)
         g.maxRedirect = Float(gaze.maxRedirect)
+        g.minOpenness = Float(gaze.minOpenness)
     }
 
     func setEffect(_ id: String, _ on: Bool) {

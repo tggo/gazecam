@@ -41,6 +41,7 @@ enum TestHarness {
             let t0 = Date()
             let n = effectID == "gaze" ? 1 : 3 // gaze warps the frame in place, so one timed pass
             for _ in 0..<n { effect.apply(to: pb!) }
+            if let g = gazeEffect { print("status:", g.debug.status, String(format: "openness %.3f", g.debug.openness)) }
             print(String(format: "%@ applied, %.1f ms/frame", effectID, Date().timeIntervalSince(t0) * 1000 / Double(n)))
         }
 
