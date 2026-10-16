@@ -24,6 +24,11 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     /// Keep an unprocessed copy of each frame for the before/after view (costs one extra render).
     var keepRaw = false
+    /// Send 480p detail: after effects the frame goes down to 854x480 and back up to 1280x720, so the
+    /// virtual camera format stays the same but fine eye detail (and warp residue) is gone.
+    var output480 = UserDefaults.standard.bool(forKey: "output480") {
+        didSet { UserDefaults.standard.set(output480, forKey: "output480") }
+    }
     let capture = DebugCapture()
 
     private let session = AVCaptureSession()
@@ -94,8 +99,8 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             onStatus?(sink.connect() ? "Транслює у GazeCam" : "Віртуальна камера не знайдена — встанови розширення")
         }
         guard let src = CMSampleBufferGetImageBuffer(sampleBuffer), let pool else { return }
-        var dst: CVPixelBuffer?
-        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dst) == kCVReturnSuccess, let dst else { return }
+        var dstOpt: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &dstOpt) == kCVReturnSuccess, var dst = dstOpt else { return }
 
         // Aspect-fill into 1280x720.
         var img = CIImage(cvPixelBuffer: src)
@@ -120,6 +125,18 @@ final class CameraPipeline: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             let te = CACurrentMediaTime()
             e.apply(to: dst)
             effectMs[e.id] = (CACurrentMediaTime() - te) * 1000
+        }
+        if output480 {
+            let te = CACurrentMediaTime()
+            let down = CGFloat(480) / CGFloat(Self.height)
+            let small = CIImage(cvPixelBuffer: dst).applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: down, kCIInputAspectRatioKey: 1])
+            let back = small.transformed(by: CGAffineTransform(scaleX: 1 / down, y: 1 / down)).cropped(to: bounds)
+            var out: CVPixelBuffer? // separate buffer: CI must not read and write the same one
+            if CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out) == kCVReturnSuccess, let out {
+                ci.render(back, to: out, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
+                dst = out
+            }
+            effectMs["480p"] = (CACurrentMediaTime() - te) * 1000
         }
 
         if sink.connected {

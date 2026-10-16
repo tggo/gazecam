@@ -95,6 +95,11 @@ struct PreviewWindow: View {
             ForEach(model.pipeline.effects, id: \.id) { e in
                 Toggle(e.title, isOn: Binding(get: { model.effectState[e.id] ?? false }, set: { model.setEffect(e.id, $0) }))
             }
+            Text("Вихід").font(.headline).padding(.top, 4)
+            Picker("Вихід", selection: Binding(get: { model.pipeline.output480 }, set: { model.pipeline.output480 = $0; model.objectWillChange.send() })) {
+                Text("720p").tag(false)
+                Text("480p деталізація").tag(true)
+            }.pickerStyle(.segmented).labelsHidden()
             Text("Превʼю").font(.headline).padding(.top, 4)
             Toggle("Оверлей (очі, рамки)", isOn: $feed.showOverlay)
             Toggle("Статистика на відео", isOn: $feed.showHUD)
