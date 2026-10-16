@@ -304,7 +304,7 @@ struct CaptureReview: View {
     var body: some View {
         VStack(spacing: 8) {
             if url.pathExtension == "mp4", let player {
-                VideoPlayer(player: player).aspectRatio(32 / 9, contentMode: .fit)
+                PlayerView(player: player).aspectRatio(32 / 9, contentMode: .fit)
                 HStack {
                     Button("◀︎ кадр") { player.pause(); player.currentItem?.step(byCount: -1) }.keyboardShortcut(.leftArrow, modifiers: [])
                     Button("кадр ▶︎") { player.pause(); player.currentItem?.step(byCount: 1) }.keyboardShortcut(.rightArrow, modifiers: [])
@@ -329,4 +329,17 @@ struct CaptureReview: View {
         .frame(minWidth: 1100, minHeight: 420)
         .onAppear { if url.pathExtension == "mp4" { player = AVPlayer(url: url) } }
     }
+}
+
+/// AppKit AVPlayerView. SwiftUI's VideoPlayer aborts on first use here (missing _AVKit_SwiftUI superclass metadata).
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+    func makeNSView(context: Context) -> AVPlayerView {
+        let v = AVPlayerView()
+        v.player = player
+        v.controlsStyle = .inline
+        v.showsFrameSteppingButtons = true
+        return v
+    }
+    func updateNSView(_ v: AVPlayerView, context: Context) { v.player = player }
 }
