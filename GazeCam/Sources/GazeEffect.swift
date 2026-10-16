@@ -28,6 +28,24 @@ final class GazeEffect: Effect {
     /// Temporal smoothing of landmarks and angle, 0 = off, 0.9 = heavy. Fast moves reset it so the eyes do not lag.
     var smoothing: Float = 0.6
 
+    /// How much of the measured horizontal eye movement to cancel (0 = fixed geometric angle only, 1 = all).
+    /// Lets reading / teleprompter line sweeps disappear. Vertical stays geometric: Vision pupils carry no vertical signal.
+    var followGaze: Float = 1
+    /// Pupil shift (fraction of eye width) per degree of model redirection, measured: +15° → +0.05.
+    var pupilPerDegree: Float = 0.0033
+    /// Hard cap on the horizontal redirect; the network was trained on roughly ±20°.
+    var maxRedirect: Float = 20
+    /// "Looking at the screen" pupil position. Drifts slowly toward the running average; calibrate() pins it.
+    private(set) var neutralX: Float?
+    private var calibrating: [Float]?
+    private var pupilX: Float?
+
+    /// Collect ~2 s of pupil positions while the user looks at the screen centre.
+    func calibrate() { calibrating = [] }
+
+    /// Fixed [vertical, horizontal] redirection for experiments (test harness).
+    var angleOverride: (Float, Float)?
+
     private var prevPoints: [CGPoint]?
     private var prevAngle: (Float, Float)?
 
@@ -39,6 +57,10 @@ final class GazeEffect: Effect {
         var eyeDistanceCm: Double = 0
         var motionPx: Double = 0        // mean landmark displacement vs previous frame, before smoothing
         var smoothingReset = false
+        var pupils: [CGPoint] = []
+        var pupilX: Float?, neutralX: Float?
+        var followDeg: Float = 0
+        var calibrating = false
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
         var eyePoints: [CGPoint] = []
         var faceBox: CGRect?
@@ -116,12 +138,34 @@ final class GazeEffect: Effect {
         let imgLeftEye = Array(cur[0..<6]), imgRightEye = Array(cur[6..<12])
 
         let cR = mid(imgLeftEye[0], imgLeftEye[3]), cL = mid(imgRightEye[0], imgRightEye[3])
-        var angle = gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
+        var angle = angleOverride ?? gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
         angle = (angle.0 * strength, angle.1 * strength)
         if !reset, let pa = prevAngle {
             angle = (pa.0 * smoothing + angle.0 * (1 - smoothing), pa.1 * smoothing + angle.1 * (1 - smoothing))
         }
         prevAngle = angle
+
+        // Cancel horizontal eye movement relative to the neutral (screen) position.
+        if angleOverride == nil, let lp = lm.leftPupil, let rp = lm.rightPupil,
+           let x = pupilOffsetX(le, lp, re, rp) {
+            let k = reset ? 0 : smoothing
+            let sx = pupilX.map { $0 * k + x * (1 - k) } ?? x
+            pupilX = sx
+            if var c = calibrating {
+                c.append(x); calibrating = c
+                if c.count >= 60 { neutralX = c.sorted()[c.count / 2]; calibrating = nil }
+            } else {
+                // ~20 s time constant: follows posture changes, not individual glances.
+                neutralX = neutralX.map { $0 * 0.998 + sx * 0.002 } ?? sx
+            }
+            if let n = neutralX {
+                let follow = -(sx - n) / pupilPerDegree * followGaze
+                d.followDeg = follow
+                angle.1 = min(max(angle.1 + follow, -maxRedirect), maxRedirect)
+            }
+            d.pupilX = sx; d.neutralX = neutralX; d.calibrating = calibrating != nil
+            d.pupils = [lp, rp].compactMap { $0.pointsInImage(imageSize: size).first }.map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) }
+        }
         d.angle = angle
         d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
         d.eyePoints = imgLeftEye + imgRightEye
@@ -141,6 +185,18 @@ final class GazeEffect: Effect {
     }
 
     // MARK: - Geometry
+
+    /// Mean horizontal pupil offset from the eye-corner midpoint, in eye widths (same as PupilProbe).
+    private func pupilOffsetX(_ le: VNFaceLandmarkRegion2D, _ lp: VNFaceLandmarkRegion2D,
+                              _ re: VNFaceLandmarkRegion2D, _ rp: VNFaceLandmarkRegion2D) -> Float? {
+        func off(_ e: VNFaceLandmarkRegion2D, _ p: VNFaceLandmarkRegion2D) -> Float? {
+            let pts = e.normalizedPoints
+            guard let l = pts.min(by: { $0.x < $1.x }), let r = pts.max(by: { $0.x < $1.x }), let c = p.normalizedPoints.first else { return nil }
+            return Float((c.x - (l.x + r.x) / 2) / max(r.x - l.x, 0.001))
+        }
+        guard let a = off(le, lp), let b = off(re, rp) else { return nil }
+        return (a + b) / 2
+    }
 
     /// Six points in dlib order: [image-left corner, upper 1/3, upper 2/3, image-right corner, lower 2/3, lower 1/3].
     private func dlibEye(_ p: [CGPoint]) -> [CGPoint] {

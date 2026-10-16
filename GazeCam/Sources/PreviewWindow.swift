@@ -114,6 +114,11 @@ struct PreviewWindow: View {
             slider("Макс. поворот голови", value: $model.gaze.maxHeadDeg, range: 5...45, unit: "°")
             slider("Розмиття краю вставки", value: $model.gaze.feather, range: 0...8, unit: "px", digits: 1)
             slider("Згладжування руху", value: $model.gaze.smoothing, range: 0...0.9, unit: "", digits: 2)
+            slider("Гасити рухи очей (читання)", value: $model.gaze.followGaze, range: 0...1.5, unit: "×", digits: 2)
+            slider("Макс. поворот погляду", value: $model.gaze.maxRedirect, range: 5...30, unit: "°")
+            Button(feed.gazeDebug.calibrating ? "Дивись у центр екрана…" : "Калібрувати: дивлюсь у центр екрана") {
+                model.pipeline.gaze.calibrate()
+            }.font(.caption)
             Button("Скинути") { model.gaze = GazeSettings() }.font(.caption)
         }
     }
@@ -164,6 +169,8 @@ struct PreviewWindow: View {
             row("Yaw / pitch", [d.yawDeg, d.pitchDeg].map { $0.map { String(format: "%.0f°", $0) } ?? "—" }.joined(separator: " / "))
             row("Кут корекції (верт / гор)", String(format: "%.0f° / %.0f°", d.angle.v, d.angle.h))
             row("Відстань до очей", d.eyeDistanceCm > 0 ? String(format: "%.0f см", d.eyeDistanceCm) : "—")
+            row("Зіниця / нейтраль", [d.pupilX, d.neutralX].map { $0.map { String(format: "%+.3f", $0) } ?? "—" }.joined(separator: " / "))
+            row("Гасіння руху", String(format: "%+.1f°", d.followDeg))
             row("Рух очей", String(format: "%.1f px/кадр%@", d.motionPx, d.smoothingReset ? " (скид)" : ""))
         }
         .font(.caption)
@@ -188,6 +195,10 @@ struct DebugOverlay: View {
             func r(_ b: CGRect) -> CGRect { CGRect(x: b.minX * sx, y: b.minY * sy, width: b.width * sx, height: b.height * sy) }
             if let f = debug.faceBox { ctx.stroke(Path(r(f)), with: .color(.yellow.opacity(0.7)), lineWidth: 1) }
             for b in debug.eyeBoxes { ctx.stroke(Path(r(b)), with: .color(.green), lineWidth: 1.5) }
+            for p in debug.pupils {
+                let c = CGPoint(x: p.x * sx, y: p.y * sy)
+                ctx.fill(Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6)), with: .color(.red))
+            }
             for p in debug.eyePoints {
                 let c = CGPoint(x: p.x * sx, y: p.y * sy)
                 ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(.cyan))

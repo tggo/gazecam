@@ -6,7 +6,7 @@ import SystemExtensions
 struct GazeCamApp: App {
     @StateObject private var model = AppModel()
 
-    init() { TestHarness.runIfRequested() }
+    init() { TestHarness.runIfRequested(); PupilProbe.runIfRequested(); VideoHarness.runIfRequested() }
 
     var body: some Scene {
         MenuBarExtra("GazeCam", systemImage: model.running ? "eye.fill" : "eye") {
@@ -32,6 +32,8 @@ struct GazeSettings: Codable, Equatable {
     var maxHeadDeg = 20.0
     var feather = 3.0
     var smoothing = 0.6
+    var followGaze = 1.0
+    var maxRedirect = 20.0
 
     init() {}
     // Tolerant decode: settings saved by an older build keep their values, new fields take defaults.
@@ -47,6 +49,8 @@ struct GazeSettings: Codable, Equatable {
         maxHeadDeg = try c.decodeIfPresent(Double.self, forKey: .maxHeadDeg) ?? d.maxHeadDeg
         feather = try c.decodeIfPresent(Double.self, forKey: .feather) ?? d.feather
         smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
+        followGaze = try c.decodeIfPresent(Double.self, forKey: .followGaze) ?? d.followGaze
+        maxRedirect = try c.decodeIfPresent(Double.self, forKey: .maxRedirect) ?? d.maxRedirect
     }
 }
 
@@ -85,6 +89,8 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
         g.maxHeadAngle = Float(gaze.maxHeadDeg * .pi / 180)
         g.feather = Float(gaze.feather)
         g.smoothing = Float(gaze.smoothing)
+        g.followGaze = Float(gaze.followGaze)
+        g.maxRedirect = Float(gaze.maxRedirect)
     }
 
     func setEffect(_ id: String, _ on: Bool) {

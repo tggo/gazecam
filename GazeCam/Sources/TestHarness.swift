@@ -28,6 +28,11 @@ enum TestHarness {
         if effectID != "none" {
             let effect: Effect = effectID == "horns" ? HornsEffect() : GazeEffect()
             gazeEffect = effect as? GazeEffect
+            if let j = args.firstIndex(of: "--angle"), args.count > j + 1 {
+                let v = args[j + 1].split(separator: ",").compactMap { Float($0) }
+                gazeEffect?.angleOverride = (v[0], v[1])
+                gazeEffect?.smoothing = 0
+            }
             effect.enabled = true
             var warm: CVPixelBuffer? // warm-up on a copy: Vision + Core ML first-run costs
             CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &warm)
