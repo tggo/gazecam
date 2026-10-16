@@ -33,7 +33,7 @@ final class GazeEffect: Effect {
     var followGaze: Float = 1
     /// Pupil shift (fraction of eye width) per degree of model redirection, measured: +15° → +0.05.
     var pupilPerDegree: Float = 0.0033
-    /// Hard cap on the horizontal redirect; the network was trained on roughly ±20°.
+    /// Hard cap on the redirect, both axes; the network was trained on roughly ±20°.
     var maxRedirect: Float = 20
     /// "Looking at the screen" pupil position. Drifts slowly toward the running average; calibrate() pins it.
     private(set) var neutralX: Float?
@@ -144,6 +144,8 @@ final class GazeEffect: Effect {
             angle = (pa.0 * smoothing + angle.0 * (1 - smoothing), pa.1 * smoothing + angle.1 * (1 - smoothing))
         }
         prevAngle = angle
+        // Past ~20° the network rolls the iris under the lid (white-eye look), so cap both axes.
+        angle.0 = min(max(angle.0, -maxRedirect), maxRedirect)
 
         // Cancel horizontal eye movement relative to the neutral (screen) position.
         if angleOverride == nil, let lp = lm.leftPupil, let rp = lm.rightPupil,
