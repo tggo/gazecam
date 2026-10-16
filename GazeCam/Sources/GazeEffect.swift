@@ -223,7 +223,12 @@ final class GazeEffect: Effect {
                 // ~20 s time constant: follows posture changes, not individual glances.
                 neutralX = neutralX.map { $0 * 0.998 + sx * 0.002 } ?? sx
             }
-            if let n = neutralX { followH = -(sx - n) / pupilPerDegree * followGaze }
+            if let n = neutralX {
+                followH = -(sx - n) / pupilPerDegree * followGaze
+                // The target is the pupil measured while looking INTO the camera, so it already contains the
+                // camera's horizontal direction; the geometric horizontal term would count it twice.
+                if neutralLocked && followGaze > 0 { angle.1 = 0 }
+            }
             d.pupilX = sx; d.neutralX = neutralX
             d.pupils = [lp, rp].compactMap { $0.pointsInImage(imageSize: size).first }.map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) }
         }
