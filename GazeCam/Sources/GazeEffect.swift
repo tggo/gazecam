@@ -43,9 +43,11 @@ final class GazeEffect: Effect {
     /// Collect ~2 s of pupil positions while the user looks at the screen centre.
     func calibrate() { calibrating = [] }
 
-    /// Eye aspect ratio below which the eyes count as closed (blink, looking far down): no correction —
-    /// Vision invents pupils on a closed lid and the network paints an eye over it.
-    var minOpenness: Float = 0.12
+    /// Eyes count as closed (blink, looking far down) below this fraction of the user's usual openness:
+    /// no correction — Vision invents pupils on a closed lid and the network paints an eye over it.
+    /// The usual openness is learned (slow EMA over open frames), so it fits any face and lighting.
+    var openRatio: Float = 0.6
+    private(set) var usualOpenness: Float = 0.22
 
     /// Fixed [vertical, horizontal] redirection for experiments (test harness).
     var angleOverride: (Float, Float)?
@@ -66,6 +68,7 @@ final class GazeEffect: Effect {
         var followDeg: Float = 0
         var calibrating = false
         var openness: Float = 0
+        var usualOpenness: Float = 0
         var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
         var eyePoints: [CGPoint] = []
         var faceBox: CGRect?
@@ -149,7 +152,10 @@ final class GazeEffect: Effect {
             return Float(v / max(2 * hypot(e[0].x - e[3].x, e[0].y - e[3].y), 1))
         }
         d.openness = (ear(imgLeftEye) + ear(imgRightEye)) / 2
-        if d.openness < minOpenness {
+        // Learn only from frames that are clearly open, so blinks do not drag the reference down.
+        if d.openness > usualOpenness * 0.8 { usualOpenness = usualOpenness * 0.99 + d.openness * 0.01 }
+        d.usualOpenness = usualOpenness
+        if d.openness < usualOpenness * openRatio {
             d.status = "очі закриті — пропуск"
             prevAngle = nil
             return

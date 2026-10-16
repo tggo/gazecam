@@ -136,7 +136,7 @@ final class DebugCapture {
             "\(d.status)",
             "yaw \(deg(d.yawDeg))  pitch \(deg(d.pitchDeg))",
             String(format: "корекція верт %.1f°  гор %.1f°", d.angle.v, d.angle.h),
-            String(format: "відкритість %.2f", d.openness),
+            String(format: "відкритість %.2f (звичайна %.2f)", d.openness, d.usualOpenness),
             String(format: "очі ~%.0f см  рух %.1f px%@", d.eyeDistanceCm, d.motionPx, d.smoothingReset ? "  [скид згладж.]" : ""),
             String(format: "зіниця %+.3f  нейтраль %+.3f  гасіння %+.1f°%@", d.pupilX ?? .nan, d.neutralX ?? .nan, d.followDeg, d.calibrating ? "  [калібрую]" : ""),
             "дроп \(s.dropped)  вірт.камера \(s.sinkConnected ? "так" : "ні")",
