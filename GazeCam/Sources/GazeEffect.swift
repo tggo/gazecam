@@ -1,4 +1,5 @@
 import CoreML
+import QuartzCore
 import CoreVideo
 import Foundation
 import Vision
@@ -20,6 +21,26 @@ final class GazeEffect: Effect {
     var ipd = 6.3
     /// Beyond this head yaw/pitch (radians) the warp looks wrong, so the effect steps aside.
     var maxHeadAngle: Float = 0.35
+    /// Multiplies the computed redirection angle (1 = geometric estimate).
+    var strength: Float = 1
+    /// Edge blend width when pasting the corrected eye back, px.
+    var feather: Float = 3
+
+    /// Last frame's state, for the preview window. Written on the capture queue, read on main.
+    struct Debug {
+        var status = "—"
+        var yawDeg: Float?, pitchDeg: Float?
+        var angle: (v: Float, h: Float) = (0, 0)
+        var eyeDistanceCm: Double = 0
+        var eyeBoxes: [CGRect] = []     // pixel coords, top-left origin
+        var eyePoints: [CGPoint] = []
+        var faceBox: CGRect?
+        var visionMs: Double = 0, modelMs: Double = 0
+    }
+    private let debugLock = NSLock()
+    private var _debug = Debug()
+    var debug: Debug { debugLock.lock(); defer { debugLock.unlock() }; return _debug }
+    private func publish(_ d: Debug) { debugLock.lock(); _debug = d; debugLock.unlock() }
 
     private let H = 48, W = 64
     private let request = VNDetectFaceLandmarksRequest()
@@ -45,16 +66,24 @@ final class GazeEffect: Effect {
     }
 
     func apply(to buffer: CVPixelBuffer) {
-        guard models.count == 2 else { return }
+        var d = Debug()
+        defer { publish(d) }
+        guard models.count == 2 else { d.status = "моделі не завантажились"; return }
+        let t0 = CACurrentMediaTime()
         let handler = VNImageRequestHandler(cvPixelBuffer: buffer, options: [:])
-        guard (try? handler.perform([request])) != nil,
-              let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
-              let lm = face.landmarks, let le = lm.leftEye, let re = lm.rightEye
-        else { return }
-        if let yaw = face.yaw?.floatValue, abs(yaw) > maxHeadAngle { return }
-        if let pitch = face.pitch?.floatValue, abs(pitch) > maxHeadAngle { return }
-
+        let ok = (try? handler.perform([request])) != nil
+        d.visionMs = (CACurrentMediaTime() - t0) * 1000
         let w = CVPixelBufferGetWidth(buffer), h = CVPixelBufferGetHeight(buffer)
+        guard ok, let face = request.results?.max(by: { $0.boundingBox.width < $1.boundingBox.width }),
+              let lm = face.landmarks, let le = lm.leftEye, let re = lm.rightEye
+        else { d.status = "обличчя не знайдено"; return }
+        let bb = face.boundingBox
+        d.faceBox = CGRect(x: bb.minX * CGFloat(w), y: (1 - bb.maxY) * CGFloat(h), width: bb.width * CGFloat(w), height: bb.height * CGFloat(h))
+        d.yawDeg = face.yaw.map { $0.floatValue * 180 / .pi }
+        d.pitchDeg = face.pitch.map { $0.floatValue * 180 / .pi }
+        if let yaw = face.yaw?.floatValue, abs(yaw) > maxHeadAngle { d.status = "голова повернута (yaw) — пропуск"; return }
+        if let pitch = face.pitch?.floatValue, abs(pitch) > maxHeadAngle { d.status = "голова нахилена (pitch) — пропуск"; return }
+
         let size = CGSize(width: w, height: h)
         // Vision image points are bottom-left origin; flip to top-left like OpenCV.
         func pts(_ r: VNFaceLandmarkRegion2D) -> [CGPoint] { r.pointsInImage(imageSize: size).map { CGPoint(x: $0.x, y: CGFloat(h) - $0.y) } }
@@ -63,7 +92,11 @@ final class GazeEffect: Effect {
         let (imgLeftEye, imgRightEye) = a[0].x < b[0].x ? (a, b) : (b, a)
 
         let cR = mid(imgLeftEye[0], imgLeftEye[3]), cL = mid(imgRightEye[0], imgRightEye[3])
-        let angle = gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
+        var angle = gazeAngle(le: cL, re: cR, w: Double(w), h: Double(h))
+        angle = (angle.0 * strength, angle.1 * strength)
+        d.angle = angle
+        d.eyeDistanceCm = focalLength * ipd / max(hypot(Double(cL.x - cR.x), Double(cL.y - cR.y)), 1)
+        d.eyePoints = imgLeftEye + imgRightEye
 
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
@@ -71,8 +104,12 @@ final class GazeEffect: Effect {
         let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
         let frame = Frame(base: base, rowBytes: rowBytes, width: w, height: h)
 
-        correct(frame, points: imgLeftEye, center: cR, side: .R, seq: [0, 1, 2, 3, 4, 5], angle: angle)
-        correct(frame, points: imgRightEye, center: cL, side: .L, seq: [3, 2, 1, 0, 5, 4], angle: angle)
+        let t1 = CACurrentMediaTime()
+        let boxes = [correct(frame, points: imgLeftEye, center: cR, side: .R, seq: [0, 1, 2, 3, 4, 5], angle: angle),
+                     correct(frame, points: imgRightEye, center: cL, side: .L, seq: [3, 2, 1, 0, 5, 4], angle: angle)]
+        d.modelMs = (CACurrentMediaTime() - t1) * 1000
+        d.eyeBoxes = boxes.compactMap { $0 }
+        d.status = d.eyeBoxes.count == 2 ? "корекція активна" : "око біля краю кадру — пропуск"
     }
 
     // MARK: - Geometry
@@ -119,14 +156,15 @@ final class GazeEffect: Effect {
         @inline(__always) func px(_ x: Int, _ y: Int) -> UnsafeMutablePointer<UInt8> { base + y * rowBytes + x * 4 }
     }
 
-    private func correct(_ f: Frame, points: [CGPoint], center: CGPoint, side: Side, seq: [Int], angle: (Float, Float)) {
+    @discardableResult
+    private func correct(_ f: Frame, points: [CGPoint], center: CGPoint, side: Side, seq: [Int], angle: (Float, Float)) -> CGRect? {
         let eyeLen = abs(points[3].x - points[0].x)
         let halfW = eyeLen * 3 / 4, boxH = 1.5 * halfW
         let top = Int(center.y - boxH * 7 / 12), bottom = Int(center.y + boxH * 5 / 12)
         let left = Int(center.x - halfW), right = Int(center.x + halfW)
-        guard top >= 0, left >= 0, bottom <= f.height, right <= f.width else { return }
+        guard top >= 0, left >= 0, bottom <= f.height, right <= f.width else { return nil }
         let oh = bottom - top, ow = right - left
-        guard oh >= 12, ow >= 16 else { return }
+        guard oh >= 12, ow >= 16 else { return nil }
 
         // Crop → 48x64 BGR [0,1] (cv2.resize INTER_LINEAR sampling).
         let img = imgArr.dataPointer.assumingMemoryBound(to: Float.self)
@@ -171,7 +209,7 @@ final class GazeEffect: Effect {
               let out = try? models[side]!.prediction(from: input),
               let flowA = out.featureValue(for: "flow")?.multiArrayValue,
               let lcmA = out.featureValue(for: "lcm")?.multiArrayValue
-        else { return }
+        else { return nil }
         let fl = flowA.toFloats(), lc = lcmA.toFloats()
 
         // Backward warp + light correction (same as convert_gaze.py warp()).
@@ -197,7 +235,7 @@ final class GazeEffect: Effect {
         }
 
         // Paste back at original size; the original hard-cuts a (3,4) px border, we feather it instead.
-        let cutY = 3, cutX = 4, feather: Float = 3
+        let cutY = 3, cutX = 4, feather = max(self.feather, 0.5)
         let rx = Float(W) / Float(ow), ry = Float(H) / Float(oh)
         for y in cutY..<(oh - cutY) {
             let fy = min(max((Float(y) + 0.5) * ry - 0.5, 0), Float(H - 1))
@@ -217,6 +255,7 @@ final class GazeEffect: Effect {
                 }
             }
         }
+        return CGRect(x: left, y: top, width: ow, height: oh)
     }
 }
 

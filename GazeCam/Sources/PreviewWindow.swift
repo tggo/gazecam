@@ -1,0 +1,205 @@
+import CoreImage
+import SwiftUI
+
+/// Live preview + every setting + debug readout. Opened from the menu-bar popover.
+struct PreviewWindow: View {
+    @EnvironmentObject var model: AppModel
+    @StateObject private var feed = PreviewFeed()
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 8) {
+                if feed.showRaw, let raw = feed.raw {
+                    HStack(spacing: 6) {
+                        frameView(raw, label: "оригінал", overlay: false)
+                        frameView(feed.processed, label: "результат", overlay: true)
+                    }
+                } else {
+                    frameView(feed.processed, label: nil, overlay: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .frame(minWidth: 640, maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    controls
+                    Divider()
+                    gazeSettings
+                    Divider()
+                    debugPanel
+                }
+                .padding(14)
+            }
+            .frame(width: 320)
+        }
+        .frame(minHeight: 520)
+        .onAppear { feed.attach(model.pipeline) }
+        .onDisappear { feed.detach() }
+    }
+
+    // MARK: Frame + overlay
+
+    @ViewBuilder
+    private func frameView(_ img: CGImage?, label: String?, overlay: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            if let img {
+                Image(decorative: img, scale: 1).resizable().aspectRatio(16 / 9, contentMode: .fit)
+                    .overlay {
+                        if overlay && feed.showOverlay { DebugOverlay(debug: feed.gazeDebug) }
+                    }
+            } else {
+                Rectangle().fill(Color.gray.opacity(0.15)).aspectRatio(16 / 9, contentMode: .fit)
+                    .overlay(Text(model.running ? "чекаю кадр…" : "натисни Старт").foregroundStyle(.secondary))
+            }
+            if let label {
+                Text(label).font(.caption.bold()).padding(4).background(.black.opacity(0.6)).foregroundStyle(.white).padding(6)
+            }
+        }
+    }
+
+    // MARK: Panels
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Камера", selection: $model.cameraID) {
+                ForEach(model.cameras, id: \.uniqueID) { Text($0.localizedName).tag($0.uniqueID) }
+            }
+            .disabled(model.running)
+            HStack {
+                Button(model.running ? "Зупинити" : "Старт") { model.toggleRun() }.keyboardShortcut(.defaultAction)
+                Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Text("Ефекти").font(.headline).padding(.top, 4)
+            ForEach(model.pipeline.effects, id: \.id) { e in
+                Toggle(e.title, isOn: Binding(get: { model.effectState[e.id] ?? false }, set: { model.setEffect(e.id, $0) }))
+            }
+            Text("Превʼю").font(.headline).padding(.top, 4)
+            Toggle("Оверлей (очі, рамки, кути)", isOn: $feed.showOverlay)
+            Toggle("Поруч з оригіналом", isOn: Binding(get: { feed.showRaw }, set: { feed.setShowRaw($0) }))
+        }
+    }
+
+    private var gazeSettings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Погляд у камеру").font(.headline)
+            slider("Камера над центром екрана", value: $model.gaze.cameraUp, range: 0...40, unit: "см")
+            slider("Камера вбік від центру", value: $model.gaze.cameraRight, range: -30...30, unit: "см")
+            slider("Камера перед екраном", value: $model.gaze.cameraDepth, range: -10...10, unit: "см")
+            slider("Сила", value: $model.gaze.strength, range: 0...2, unit: "×", digits: 2)
+            slider("Фокусна відстань", value: $model.gaze.focalLength, range: 500...2000, unit: "px")
+            slider("Міжзіничкова відстань", value: $model.gaze.ipd, range: 5...7.5, unit: "см", digits: 1)
+            slider("Макс. поворот голови", value: $model.gaze.maxHeadDeg, range: 5...45, unit: "°")
+            slider("Розмиття краю вставки", value: $model.gaze.feather, range: 0...8, unit: "px", digits: 1)
+            Button("Скинути") { model.gaze = GazeSettings() }.font(.caption)
+        }
+    }
+
+    private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String, digits: Int = 0) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(String(format: "%.\(digits)f %@", value.wrappedValue, unit)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+        }
+    }
+
+    private var debugPanel: some View {
+        let s = feed.stats, d = feed.gazeDebug
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("Дебаг").font(.headline)
+            row("FPS", String(format: "%.0f", s.fps))
+            row("Кадр усього", String(format: "%.1f мс", s.frameMs))
+            ForEach(s.effectMs.sorted(by: { $0.key < $1.key }), id: \.key) { k, v in row("  \(k)", String(format: "%.1f мс", v)) }
+            row("  gaze: Vision", String(format: "%.1f мс", d.visionMs))
+            row("  gaze: модель+warp", String(format: "%.1f мс", d.modelMs))
+            row("Вхід камери", s.inputSize == .zero ? "—" : "\(Int(s.inputSize.width))×\(Int(s.inputSize.height))")
+            row("Пропущено кадрів", "\(s.dropped)")
+            row("Віртуальна камера", s.sinkConnected ? "підключена" : "ні")
+            Divider().padding(.vertical, 4)
+            row("Стан погляду", d.status)
+            row("Yaw / pitch", [d.yawDeg, d.pitchDeg].map { $0.map { String(format: "%.0f°", $0) } ?? "—" }.joined(separator: " / "))
+            row("Кут корекції (верт / гор)", String(format: "%.0f° / %.0f°", d.angle.v, d.angle.h))
+            row("Відстань до очей", d.eyeDistanceCm > 0 ? String(format: "%.0f см", d.eyeDistanceCm) : "—")
+        }
+        .font(.caption)
+    }
+
+    private func row(_ k: String, _ v: String) -> some View {
+        HStack(alignment: .top) {
+            Text(k).foregroundStyle(.secondary)
+            Spacer()
+            Text(v).monospacedDigit().multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+/// Face box, eye crops and the 12 landmark points, in 1280x720 frame coordinates.
+struct DebugOverlay: View {
+    let debug: GazeEffect.Debug
+
+    var body: some View {
+        Canvas { ctx, size in
+            let sx = size.width / CGFloat(CameraPipeline.width), sy = size.height / CGFloat(CameraPipeline.height)
+            func r(_ b: CGRect) -> CGRect { CGRect(x: b.minX * sx, y: b.minY * sy, width: b.width * sx, height: b.height * sy) }
+            if let f = debug.faceBox { ctx.stroke(Path(r(f)), with: .color(.yellow.opacity(0.7)), lineWidth: 1) }
+            for b in debug.eyeBoxes { ctx.stroke(Path(r(b)), with: .color(.green), lineWidth: 1.5) }
+            for p in debug.eyePoints {
+                let c = CGPoint(x: p.x * sx, y: p.y * sy)
+                ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(.cyan))
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Pulls the pipeline's latest frames ~30×/s while the window is open.
+@MainActor
+final class PreviewFeed: ObservableObject {
+    @Published var processed: CGImage?
+    @Published var raw: CGImage?
+    @Published var stats = CameraPipeline.Stats()
+    @Published var gazeDebug = GazeEffect.Debug()
+    @Published var showOverlay = true
+    @Published private(set) var showRaw = false
+
+    private weak var pipeline: CameraPipeline?
+    private var timer: Timer?
+    private let ci = CIContext()
+
+    func attach(_ p: CameraPipeline) {
+        pipeline = p
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
+    }
+
+    func detach() {
+        timer?.invalidate(); timer = nil
+        pipeline?.keepRaw = false
+    }
+
+    func setShowRaw(_ on: Bool) {
+        showRaw = on
+        pipeline?.keepRaw = on
+    }
+
+    private func tick() {
+        guard let p = pipeline else { return }
+        var s = p.stats
+        processed = s.processed.flatMap(cgImage)
+        raw = showRaw ? s.raw.flatMap(cgImage) : nil
+        s.processed = nil; s.raw = nil
+        stats = s
+        gazeDebug = p.gaze.debug
+    }
+
+    private func cgImage(_ pb: CVPixelBuffer) -> CGImage? {
+        ci.createCGImage(CIImage(cvPixelBuffer: pb), from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(pb), height: CVPixelBufferGetHeight(pb)))
+    }
+}

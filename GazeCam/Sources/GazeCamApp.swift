@@ -13,7 +13,24 @@ struct GazeCamApp: App {
             MenuView().environmentObject(model)
         }
         .menuBarExtraStyle(.window)
+
+        Window("GazeCam", id: "preview") {
+            PreviewWindow().environmentObject(model)
+        }
+        .defaultSize(width: 1180, height: 640)
     }
+}
+
+/// Gaze tunables, persisted in UserDefaults and pushed into the effect on every change.
+struct GazeSettings: Codable, Equatable {
+    var cameraUp = 18.0
+    var cameraRight = 0.0
+    var cameraDepth = -1.0
+    var strength = 1.0
+    var focalLength = 1000.0
+    var ipd = 6.3
+    var maxHeadDeg = 20.0
+    var feather = 3.0
 }
 
 @MainActor
@@ -24,18 +41,32 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
     @Published var cameras: [AVCaptureDevice] = CameraPipeline.cameras()
     @Published var cameraID: String = ""
     @Published var effectState: [String: Bool] = [:]
-    @Published var cameraHeight: Double = -18
+    @Published var gaze: GazeSettings {
+        didSet { applyGaze(); if let d = try? JSONEncoder().encode(gaze) { UserDefaults.standard.set(d, forKey: "gaze") } }
+    }
 
     let pipeline = CameraPipeline()
     private let extID = "dev.iamhero.GazeCam.Extension"
 
     override init() {
+        gaze = (UserDefaults.standard.data(forKey: "gaze")).flatMap { try? JSONDecoder().decode(GazeSettings.self, from: $0) } ?? GazeSettings()
         super.init()
+        applyGaze()
         cameraID = cameras.first?.uniqueID ?? ""
         for e in pipeline.effects { effectState[e.id] = e.enabled }
         pipeline.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         // Activation is idempotent; doing it on launch also picks up a rebuilt extension.
         installExtension()
+    }
+
+    private func applyGaze() {
+        let g = pipeline.gaze
+        g.cameraOffset = SIMD3(gaze.cameraRight, -gaze.cameraUp, gaze.cameraDepth)
+        g.strength = Float(gaze.strength)
+        g.focalLength = gaze.focalLength
+        g.ipd = gaze.ipd
+        g.maxHeadAngle = Float(gaze.maxHeadDeg * .pi / 180)
+        g.feather = Float(gaze.feather)
     }
 
     func setEffect(_ id: String, _ on: Bool) {
@@ -87,6 +118,7 @@ final class AppModel: NSObject, ObservableObject, OSSystemExtensionRequestDelega
 
 struct MenuView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -105,9 +137,9 @@ struct MenuView: View {
             ForEach(model.pipeline.effects, id: \.id) { e in
                 Toggle(e.title, isOn: Binding(get: { model.effectState[e.id] ?? false }, set: { model.setEffect(e.id, $0) }))
             }
-            if let gaze = model.pipeline.effects.first(where: { $0 is GazeEffect }) as? GazeEffect {
-                Text("Камера над центром екрана: \(Int(-model.cameraHeight)) см").font(.caption)
-                Slider(value: Binding(get: { -model.cameraHeight }, set: { model.cameraHeight = -$0; gaze.cameraOffset.y = -$0 }), in: 0...40)
+            Button("Превʼю і налаштування…") {
+                openWindow(id: "preview")
+                NSApp.activate(ignoringOtherApps: true)
             }
 
             Divider()
