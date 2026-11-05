@@ -2,3 +2,5 @@ build/
 GazeCam.xcodeproj/
 .DS_Store
 *.xcuserstate
+GazeCam/Models/GazeWarpUser*.mlpackage/
+GazeCam/Models/GazeEstimator.mlpackage/
