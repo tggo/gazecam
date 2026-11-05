@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GazeCam — корекція погляду для macOS</title>
+<meta name="description" content="Віртуальна камера для macOS, яка виправляє погляд: ви дивитесь на екран, а на відео — в камеру.">
+<style>
+:root{--bg:#fbfaf8;--fg:#1d1c1a;--mute:#6b675f;--line:#e4e0d8;--card:#fff;--acc:#2f6fdb;--code:#f2efe9}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--fg:#ecebe8;--mute:#9c988f;--line:#2c2b29;--card:#1c1c1b;--acc:#7aa7ff;--code:#222120}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:0 16px}
+header{padding:56px 0 32px;border-bottom:1px solid var(--line)}
+h1{font-size:2.4rem;margin:0 0 8px;letter-spacing:-.02em}
+.lead{font-size:1.15rem;color:var(--mute);margin:0 0 20px}
+nav a{margin-right:18px;color:var(--acc);text-decoration:none;font-weight:500}
+h2{font-size:1.5rem;margin:48px 0 12px;letter-spacing:-.01em}
+h3{font-size:1.1rem;margin:28px 0 8px}
+a{color:var(--acc)}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:.9em ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:.86rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+pre code{background:none;padding:0}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
+.flow span{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:.9rem}
+.flow i{color:var(--mute);font-style:normal}
+.note{border-left:3px solid var(--acc);background:var(--card);padding:10px 14px;border-radius:0 6px 6px 0;margin:16px 0}
+table{border-collapse:collapse;width:100%;font-size:.92rem;margin:12px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left}
+th{color:var(--mute);font-weight:600}
+ol li,ul li{margin:4px 0}
+footer{margin:64px 0 40px;padding-top:20px;border-top:1px solid var(--line);color:var(--mute);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>GazeCam</h1>
+  <p class="lead">Віртуальна камера для macOS, яка виправляє погляд. Ви дивитесь на співрозмовника на екрані, а на відео виглядає, ніби дивитесь просто в камеру.</p>
+  <nav><a href="#start">Початок роботи</a><a href="#train">Тренування</a><a href="https://github.com/tggo/gazecam">GitHub</a></nav>
+</header>
+
+<h2>Як це працює</h2>
+<div class="flow">
+  <span>Камера</span><i>→</i><span>Vision: точки очей</span><i>→</i><span>кроп кожного ока</span><i>→</i><span>Core ML: потік + світло</span><i>→</i><span>вставка назад</span><i>→</i><span>віртуальна камера</span>
+</div>
+<p>Застосунок у рядку меню бере кадр із реальної камери, знаходить очі, «доводить» зіниці до камери нейромережею-деформатором і віддає результат через розширення CoreMediaIO. У Zoom, Meet, FaceTime тощо просто оберіть камеру <b>GazeCam</b>.</p>
+
+<h2 id="start">Початок роботи</h2>
+<h3>Що потрібно</h3>
+<ul>
+  <li>Mac на Apple Silicon (arm64), macOS 14+</li>
+  <li>Xcode і <a href="https://github.com/yonaskolb/XcodeGen">XcodeGen</a> (<code>brew install xcodegen</code>)</li>
+  <li>Обліковий запис Apple Developer: системні розширення треба підписувати</li>
+</ul>
+
+<h3>Збірка і встановлення</h3>
+<pre><code>git clone https://github.com/tggo/gazecam.git
+cd gazecam
+make dev        # xcodegen → xcodebuild (Release) → /Applications → запуск</code></pre>
+<div class="note">Системні розширення активуються лише з <code>/Applications</code>, тому <code>make dev</code> встановлює застосунок саме туди.</div>
+<p>Makefile підписує збірку через ключ App Store Connect API (<code>~/.appstoreconnect/private_keys/AuthKey_&lt;ID&gt;.p8</code>). Підставте свої значення:</p>
+<pre><code>make dev ASC_KEY_ID=XXXXXXXXXX ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</code></pre>
+<p>Або відкрийте <code>GazeCam.xcodeproj</code> після <code>make generate</code> і виставте свою команду в Signing.</p>
+
+<h3>Перший запуск</h3>
+<ol>
+  <li>В іконці в рядку меню натисніть <b>«Встановити камеру»</b> і дозвольте розширення в <i>Системних параметрах → Загальні → Входи та розширення</i>.</li>
+  <li>Оберіть реальну камеру в пікері <b>«Камера»</b>.</li>
+  <li>Відкрийте <b>«Превʼю і налаштування…»</b>: увімкніть «Поруч з оригіналом», щоб бачити ефект, а «Оверлей» покаже знайдені очі.</li>
+  <li>У застосунку для дзвінків оберіть камеру <b>GazeCam</b>.</li>
+</ol>
+<p>Логи: <code>make logs</code>. Видалити розширення можна кнопкою «Видалити» в меню.</p>
+
+<h2 id="train">Тренування під себе</h2>
+<p>Стокові ваги працюють на будь-кому, але найкраще мережа поводиться, коли її донавчити на вашому обличчі, камері й відстані. Персональних моделей у репозиторії немає: ви тренуєте їх самі.</p>
+<table>
+  <tr><th>Модель</th><th>Що робить</th><th>Скрипти</th></tr>
+  <tr><td><code>GazeWarpUser{L,R}</code></td><td>донавчений деформатор очей</td><td><code>finetune.py</code>, <code>export_coreml.py</code></td></tr>
+  <tr><td><code>GazeEstimator</code></td><td>оцінює, куди ви дивитесь (замість евристики зіниць)</td><td><code>train_estimator.py</code>, <code>export_estimator.py</code></td></tr>
+</table>
+
+<h3>1. Середовище</h3>
+<pre><code>cd train
+python3.12 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install torch==2.7.0 tensorflow==2.20.0 coremltools==9.0 numpy opencv-python</code></pre>
+<p>TensorFlow потрібен лише для одноразового завантаження оригінальних TF1-чекпойнтів. На Mac тренування йде на MPS, приблизно 1 с на епоху.</p>
+
+<h3>2. Оригінальні ваги «Look at Me!»</h3>
+<p>Завантажте чекпойнти з <a href="https://github.com/chihfanhsu/gaze_correction">chihfanhsu/gaze_correction</a> і вкажіть шлях у <code>DEFAULT_WEIGHTS</code> / <code>DEFAULT_REPO</code> в <code>load_tf.py</code>. Перевірка паритету TF ↔ torch:</p>
+<pre><code>python load_tf.py          # пише parity.json</code></pre>
+
+<h3>3. Збір датасету</h3>
+<p>У вікні превʼю натисніть <b>«Збір датасету (≈45 с, 18 точок)»</b>. По екрану бігає точка (сітка 3×3), і кожні кілька точок треба подивитись у камеру. Дивіться на точку, голову тримайте як під час звичайного дзвінка. Кадри з мітками зберігаються в:</p>
+<pre><code>~/Movies/GazeCam/dataset/&lt;сесія&gt;/NNNN.jpg + labels.csv</code></pre>
+<div class="note">Зберіть <b>щонайменше 5–6 сесій</b> на різних відстанях і з різним світлом. Одну відкладіть для валідації, а для оцінювача ще одну для тесту. З однієї-двох сесій мережа перенавчиться.</div>
+<p>Перевірте, скільки пар залишилось після фільтрів (кліпання, саккади, дублікати):</p>
+<pre><code>python dataset.py --sessions ~/Movies/GazeCam/dataset/* --stats
+python dataset.py --sessions ~/Movies/GazeCam/dataset/* --sign-check   # знак кута; очікувано (+,-)</code></pre>
+
+<h3>4. Донавчання деформатора</h3>
+<pre><code>VAL=2026-10-16_19-09-30     # назва вашої відкладеної сесії
+python finetune.py --side R --val-session $VAL --lr 3e-5 --epochs 12 --patience 4 --out runs/R
+python finetune.py --side L --val-session $VAL --lr 3e-5 --epochs 12 --patience 4 --out runs/L
+python export_coreml.py --side R --ckpt runs/R/best.pt --out export_finetuned
+python export_coreml.py --side L --ckpt runs/L/best.pt --out export_finetuned</code></pre>
+<p>Валідація зазвичай найкраща вже на 1–2 епосі, далі мережа перенавчається, тож багато епох не потрібно. Піксельний L1 не показує, чи справді «дивиться в камеру», тому <b>перевіряйте результат очима в превʼю</b>.</p>
+<p>Встановлення: експорт пише <code>GazeWarp{L,R}.mlpackage</code>, а застосунок шукає <code>GazeWarpUser{L,R}</code>:</p>
+<pre><code>cp -R export_finetuned/GazeWarpR.mlpackage ../GazeCam/Models/GazeWarpUserR.mlpackage
+cp -R export_finetuned/GazeWarpL.mlpackage ../GazeCam/Models/GazeWarpUserL.mlpackage</code></pre>
+
+<h3>5. Оцінювач погляду (необовʼязково)</h3>
+<p>Спершу пропишіть свої сесії в <code>SESSIONS</code> у <code>estimator_data.py</code> (train / val / test), потім:</p>
+<pre><code>python train_estimator.py --epochs 60 --patience 100 --out runs/est
+python export_estimator.py --ckpt runs/est/best.pt --out export_estimator
+cp -R export_estimator/GazeEstimator.mlpackage ../GazeCam/Models/</code></pre>
+<p>Мережа має 291k параметрів, інференс займає близько 0,12 мс. На тестовій сесії автора похибка вийшла 4,6° по вертикалі і 2,9° по горизонталі, тоді як евристика зіниць дає 12,3° і 6,4°. Результати помітно гуляють між запусками, бо даних мало.</p>
+
+<h3>6. Увімкнути у застосунку</h3>
+<pre><code>cd .. &amp;&amp; make dev</code></pre>
+<p>У превʼю оберіть свою модель у пікерах <b>«Модель корекції»</b> і <b>«Куди дивлюсь — оцінка»</b>. Якщо файлів немає, застосунок просто працює на стокових вагах і зіницях Vision.</p>
+<p>Деталі вимірювань (паритет, знаки кутів, таблиці метрик) описані в <a href="https://github.com/tggo/gazecam/blob/main/train/README.md"><code>train/README.md</code></a>.</p>
+
+<footer>
+  Мережа-деформатор і її передтреновані ваги взяті з роботи <b>«Look at Me! Correcting Eye Gaze in Live Video Communication»</b> (Chih-Fan Hsu, Yu-Shuen Wang, Chin-Laung Lei, Kuan-Ta Chen, ACM TOMM 2019, <a href="https://github.com/chihfanhsu/gaze_correction">github.com/chihfanhsu/gaze_correction</a>). Усі права на оригінальну модель належать її авторам.
+</footer>
+</div>
+</body>
+</html>

@@ -1,5 +1,7 @@
 # GazeCam
 
+Документація українською: https://tggo.github.io/gazecam/
+
 macOS virtual camera that corrects eye contact: it warps your eyes so you appear to look into the lens while you
 actually look at the screen. A menu-bar app plus a CoreMediaIO camera extension; pick "GazeCam" as the camera in any
 video-call app.
